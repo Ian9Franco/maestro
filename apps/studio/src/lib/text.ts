@@ -1,6 +1,16 @@
 export type DocKind = "personaje" | "saga" | "lore" | "notas";
 
-export type FactorId = "tono" | "tension" | "foco";
+export type FactorId =
+  | "tono"
+  | "tension"
+  | "ritmo"
+  | "foco"
+  | "modo"
+  | "distancia"
+  | "cierre"
+  | "sorpresa";
+
+export type FactorStop = { at: number; word: string };
 
 export type Factor = {
   id: FactorId;
@@ -8,6 +18,7 @@ export type Factor = {
   neg: string;
   pos: string;
   value: number;
+  stops?: FactorStop[];
 };
 
 export type AttentionBox = {
@@ -26,12 +37,39 @@ export type SourceDoc = {
   spans: string[];
 };
 
-export type FactorHits = Record<FactorId, boolean>;
+export type FactorHits = Partial<Record<FactorId, boolean>>;
+
+export type Reading = {
+  id: FactorId;
+  name: string;
+  word: string;
+  pct: number;
+  contradicts: boolean;
+};
+
+export type PassageBox = { from: number; to: number; weight: number };
+
+export type CurveView = "closed" | "ring" | FactorId;
 
 export const FACTORS: Factor[] = [
-  { id: "tono", name: "tono", neg: "tierno", pos: "sombrío", value: -0.42 },
+  {
+    id: "tono",
+    name: "tono",
+    neg: "irónico",
+    pos: "asombroso",
+    stops: [
+      { at: -0.55, word: "tierno" },
+      { at: 0.42, word: "sombrío" },
+    ],
+    value: -0.58,
+  },
   { id: "tension", name: "tensión", neg: "suelta", pos: "tensa", value: 0.81 },
-  { id: "foco", name: "foco", neg: "Mara", pos: "narrador", value: 0.64 },
+  { id: "ritmo", name: "ritmo", neg: "comprimido", pos: "holgado", value: -0.36 },
+  { id: "foco", name: "foco", neg: "Mara", pos: "narrador", value: -0.78 },
+  { id: "modo", name: "modo", neg: "acción", pos: "descripción", value: -0.9 },
+  { id: "distancia", name: "distancia", neg: "cerca", pos: "lejos", value: 0.22 },
+  { id: "cierre", name: "cierre", neg: "abierto", pos: "cerrado", value: -0.2 },
+  { id: "sorpresa", name: "sorpresa", neg: "esperable", pos: "imprevisto", value: 0.7 },
 ];
 
 export const SAMPLE_LINES = [
@@ -147,10 +185,86 @@ export function factorHit(line: string, factor: Factor): boolean {
 export function factorReadout(factor: Factor): { word: string; pct: number } {
   const magnitude = Math.abs(factor.value);
   if (magnitude < 0.08) return { word: "neutro", pct: Math.round((1 - magnitude) * 100) };
-  return {
-    word: factor.value < 0 ? factor.neg : factor.pos,
-    pct: Math.round(magnitude * 100),
-  };
+  const marks = [{ at: -1, word: factor.neg }, ...(factor.stops ?? []), { at: 1, word: factor.pos }];
+  let best = marks[0];
+  if (!best) return { word: "neutro", pct: 0 };
+  for (const mark of marks) {
+    if (Math.abs(mark.at - factor.value) < Math.abs(best.at - factor.value)) best = mark;
+  }
+  return { word: best.word, pct: Math.round(magnitude * 100) };
+}
+
+const CUES: Record<string, string[]> = {
+  tono: ["noche", "niña", "silencio", "miedo", "sombra"],
+  tension: ["golpe", "frena", "agua", "cuenta", "puerta"],
+  ritmo: ["ritmo", "siempre", "luego", "otro"],
+  foco: ["mara", "niña", "narrador"],
+  modo: ["dice", "señala", "abre", "pregunta", "golpe"],
+  distancia: ["enfrente", "lejos", "ventanilla", "andén", "medio"],
+  cierre: ["todavía", "sigue", "estación", "baja"],
+  sorpresa: ["nadie", "destino", "sombra", "no tiene"],
+};
+
+export function admitFactors(lines: string[], cursor: number, factors: Factor[]): Factor[] {
+  const text = lines.slice(0, Math.max(cursor, 0)).join(" ").toLowerCase();
+  const ranked = factors.map((factor) => {
+    const hits = (CUES[factor.id] ?? []).reduce((sum, cue) => sum + Math.max(0, text.split(cue).length - 1), 0);
+    const salt = (hashString(`${Math.min(cursor, 12)}:${factor.id}`) % 10) / 100;
+    return { factor, score: hits + salt };
+  });
+  ranked.sort((a, b) => b.score - a.score || a.factor.name.localeCompare(b.factor.name));
+  return ranked.slice(0, 5).map((item) => item.factor);
+}
+
+export function diagnose(
+  lines: string[],
+  cursor: number,
+  boxes: AttentionBox[],
+  factors: Factor[],
+  steers: FactorId[],
+): Reading[] {
+  const pins = boxes.filter((box) => box.lineIndex < cursor);
+  if (pins.length === 0) return [];
+  const text = pins.map((box) => phraseOf(lines[box.lineIndex] ?? "", box)).join(" ");
+  const readings: Reading[] = [];
+  for (const factor of admitFactors(lines, cursor, factors)) {
+    const align = ((hashString(`${text}:${factor.id}:read`) % 100) / 100) * 2 - 1;
+    const readout = factorReadout({ ...factor, value: align });
+    const steered = steers.includes(factor.id);
+    const contradicts =
+      steered && Math.sign(align) !== Math.sign(factor.value) && Math.abs(align) > 0.25 && Math.abs(factor.value) > 0.15;
+    if (steered && !contradicts) continue;
+    readings.push({
+      id: factor.id,
+      name: factor.name,
+      word: readout.word,
+      pct: readout.pct,
+      contradicts,
+    });
+  }
+  return readings.slice(0, 4);
+}
+
+export function passageBoxes(
+  lines: string[],
+  cursor: number,
+  attention: AttentionBox[],
+  factorValue: number,
+): PassageBox[] {
+  if (cursor < 4) return [];
+  const scores = lines.slice(0, cursor).map((line, index) => rawLineScore(line, index, attention, factorValue));
+  const bands = 3;
+  const size = Math.ceil(cursor / bands);
+  const regions: PassageBox[] = [];
+  for (let band = 0; band < bands; band += 1) {
+    const from = band * size;
+    const to = Math.min(cursor, from + size);
+    if (to <= from) continue;
+    const slice = scores.slice(from, to);
+    const mean = slice.reduce((sum, score) => sum + score, 0) / slice.length;
+    regions.push({ from, to, weight: Math.round((mean / 30) * 100) / 100 });
+  }
+  return regions;
 }
 
 export function clamp(value: number, min: number, max: number): number {

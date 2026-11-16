@@ -21,7 +21,7 @@ type Drag =
   | { kind: "move"; id: string; dx: number; dy: number; x: number; y: number }
   | { kind: "weight"; id: string; startX: number; startWeight: number }
   | { kind: "select"; anchorLine: number; anchorWord: number; line: number; word: number }
-  | { kind: "play"; anchorBottom: number; generated: number };
+  | { kind: "play"; anchorBottom: number; generated: number; startX: number; startY: number; moved: boolean };
 
 export function Manuscript({ onHeight }: { onHeight: (index: number, height: number) => void }) {
   const lines = useDesk((state) => state.lines);
@@ -39,6 +39,9 @@ export function Manuscript({ onHeight }: { onHeight: (index: number, height: num
   const endGesture = useDesk((state) => state.endGesture);
   const factors = useDesk((state) => state.factors);
   const activeFactor = useDesk((state) => state.activeFactor);
+  const steers = useDesk((state) => state.steers);
+  const curve = useDesk((state) => state.curve);
+  const toggleOrigin = useDesk((state) => state.toggleOrigin);
   const docs = useDesk((state) => state.docs);
   const variant = useDesk((state) => state.variant);
   const addBox = useDesk((state) => state.addBox);
@@ -147,9 +150,13 @@ export function Manuscript({ onHeight }: { onHeight: (index: number, height: num
         const content = contentRef.current;
         const origin = content?.getBoundingClientRect();
         if (!content || !origin) return;
+        const moved = current.moved || Math.hypot(event.clientX - current.startX, event.clientY - current.startY) > 8;
+        if (!moved) return;
+        const playing = { ...current, moved: true };
+        dragRef.current = playing;
         const y = event.clientY;
-        if (y > current.anchorBottom + 28) {
-          const want = Math.min(3, Math.floor((y - current.anchorBottom) / 34));
+        if (y > playing.anchorBottom + 28) {
+          const want = Math.min(3, Math.floor((y - playing.anchorBottom) / 34));
           while (dragRef.current?.kind === "play" && dragRef.current.generated < want) {
             dragRef.current = { ...dragRef.current, generated: dragRef.current.generated + 1 };
             writeTake();
@@ -181,7 +188,10 @@ export function Manuscript({ onHeight }: { onHeight: (index: number, height: num
           for (const span of spans) addSpan(span.line, span.start, span.end);
         }
       }
-      if (current.kind === "play") endGesture();
+      if (current.kind === "play") {
+        endGesture();
+        if (!current.moved && current.generated === 0) toggleOrigin();
+      }
       setDrag(null);
     }
     window.addEventListener("pointermove", move);
@@ -190,7 +200,7 @@ export function Manuscript({ onHeight }: { onHeight: (index: number, height: num
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
     };
-  }, [addSpan, cutTo, endGesture, lines, moveBox, page, setBoxWeight, writeTake]);
+  }, [addSpan, cutTo, endGesture, lines, moveBox, page, setBoxWeight, toggleOrigin, writeTake]);
 
   function extendTo(line: number, word: number) {
     const selected = boxes.find((box) => box.id === selectedBoxId);
@@ -244,6 +254,9 @@ export function Manuscript({ onHeight }: { onHeight: (index: number, height: num
       kind: "play",
       anchorBottom: last ? last.getBoundingClientRect().bottom : event.clientY,
       generated: 0,
+      startX: event.clientX,
+      startY: event.clientY,
+      moved: false,
     };
     dragRef.current = next;
     setDrag(next);
@@ -273,15 +286,24 @@ export function Manuscript({ onHeight }: { onHeight: (index: number, height: num
       : boxes;
   const beat =
     freshIndex === null
-      ? composeBeat({ lines, cursor, boxes: previewBoxes, factors, docs, activeFactor, variant })
+      ? composeBeat({
+          lines,
+          cursor,
+          boxes: previewBoxes,
+          factors,
+          docs,
+          activeFactor,
+          steers,
+          variant,
+        })
       : null;
   const futureHere = cursor === 0 ? page === 0 : page === Math.floor((cursor - 1) / PAGE_SIZE);
 
   return (
     <div
       ref={contentRef}
-      className="relative min-w-0 pb-36"
-      title="Arrastrá de una palabra a otra para fijar una frase. El punto rojo se arrastra: arriba recorta, abajo escribe una oración nueva."
+      className={`relative min-w-0 ${curve === "closed" ? "pb-36" : "pb-[420px]"}`}
+      title="Arrastrá de una palabra a otra para fijar una frase. Un clic en el punto abre las curvas. Arrastrarlo: arriba recorta, abajo escribe."
     >
       <div className="h-8" />
       <AnimatePresence initial={false}>
@@ -336,7 +358,7 @@ export function Manuscript({ onHeight }: { onHeight: (index: number, height: num
       {caret ? (
         <button
           type="button"
-          aria-label="Punto de escritura. Arriba recorta, abajo genera una oración nueva."
+          aria-label="Punto de escritura. Un clic abre las curvas. Arriba recorta, abajo genera."
           className="absolute z-30 h-4 w-4 -translate-x-1/2 -translate-y-1/2 cursor-ns-resize rounded-full border border-[#ff4b2a] bg-white shadow-[0_0_10px_rgba(255,70,40,0.85)]"
           style={{ left: caret.x, top: caret.y }}
           onPointerDown={beginPlay}
@@ -423,7 +445,7 @@ function LineWords({
               aria-label={marked ? `Mover atención de ${word}` : `Fijar ${word}`}
               data-word-index={wordIndex}
               data-line={index}
-              data-phrase-end={selected && box && wordIndex === box.wordEnd ? "" : undefined}
+              data-pin={box && wordIndex === Math.max(box.wordStart, box.wordEnd) ? box.id : undefined}
               className={`rounded-[2px] ${lit ? "bg-white text-black" : marked ? "cursor-grab touch-none text-white" : "cursor-pointer"}`}
               style={{
                 boxShadow: marked && !lit ? "inset 0 -1px 0 rgba(255,92,48,0.95)" : undefined,

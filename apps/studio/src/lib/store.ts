@@ -8,6 +8,7 @@ import {
   type DocKind,
   FACTORS,
   type Factor,
+  type CurveView,
   type FactorHits,
   type FactorId,
   type SourceDoc,
@@ -34,6 +35,8 @@ type HistorySnap = {
   checks: Record<number, FactorHits>;
   variant: number;
   page: number;
+  curve: CurveView;
+  steers: FactorId[];
 };
 
 type DeskState = {
@@ -52,6 +55,8 @@ type DeskState = {
   selectedBoxId: string | null;
   factors: Factor[];
   activeFactor: FactorId;
+  curve: CurveView;
+  steers: FactorId[];
   docs: SourceDoc[];
   drawerOpen: boolean;
   checks: Record<number, FactorHits>;
@@ -74,6 +79,9 @@ type DeskState = {
   selectBox: (id: string | null) => void;
   setActiveFactor: (id: FactorId) => void;
   setFactorValue: (id: FactorId, value: number) => void;
+  toggleOrigin: () => void;
+  openCurve: (id: FactorId) => void;
+  closeOrigin: () => void;
   addDoc: (name: string, kind: DocKind, text: string) => void;
   removeDoc: (id: string) => void;
   setDrawerOpen: (open: boolean) => void;
@@ -81,11 +89,9 @@ type DeskState = {
 };
 
 function hitsFor(line: string, factors: Factor[]): FactorHits {
-  return {
-    tono: factorHit(line, factors.find((factor) => factor.id === "tono") ?? FACTORS[0]),
-    tension: factorHit(line, factors.find((factor) => factor.id === "tension") ?? FACTORS[1]),
-    foco: factorHit(line, factors.find((factor) => factor.id === "foco") ?? FACTORS[2]),
-  };
+  const hits: FactorHits = {};
+  for (const factor of factors) hits[factor.id] = factorHit(line, factor);
+  return hits;
 }
 
 function initialChecks(lines: string[], upto: number, factors: Factor[]) {
@@ -114,6 +120,8 @@ function capture(state: DeskState): HistorySnap {
     checks: state.checks,
     variant: state.variant,
     page: state.page,
+    curve: state.curve,
+    steers: state.steers,
   };
 }
 
@@ -156,6 +164,8 @@ function project(state: DeskState, kept: number[]): HistorySnap {
     checks,
     variant: state.variant,
     page: pageFor(cursor),
+    curve: state.curve,
+    steers: state.steers,
   };
 }
 
@@ -183,6 +193,7 @@ function takeFrom(state: DeskState) {
     factors: state.factors,
     docs: state.docs,
     activeFactor: state.activeFactor,
+    steers: state.steers,
     variant: state.variant,
   });
   const index = base.lines.length;
@@ -248,6 +259,8 @@ export const useDesk = create<DeskState>((set) => ({
   selectedBoxId: "box-pagina",
   factors: FACTORS,
   activeFactor: "tono",
+  curve: "closed",
+  steers: [],
   docs: SAMPLE_DOCS,
   drawerOpen: false,
   checks: initialChecks(INITIAL_LINES, INITIAL_LINES.length, FACTORS),
@@ -349,6 +362,19 @@ export const useDesk = create<DeskState>((set) => ({
     })),
   selectBox: (id) => set({ selectedBoxId: id }),
   setActiveFactor: (id) => set({ activeFactor: id }),
+  toggleOrigin: () =>
+    set((state) => {
+      if (state.curve === "closed") return { curve: "ring" };
+      if (state.curve === "ring") return { curve: "closed" };
+      return { curve: "ring" };
+    }),
+  openCurve: (id) =>
+    set((state) => ({
+      curve: id,
+      activeFactor: id,
+      steers: state.steers.includes(id) ? state.steers : [...state.steers, id],
+    })),
+  closeOrigin: () => set({ curve: "closed" }),
   setFactorValue: (id, value) =>
     set((state) => ({
       factors: state.factors.map((factor) =>
@@ -399,6 +425,8 @@ export const useDesk = create<DeskState>((set) => ({
         selectedBoxId: snapshot.boxes[0]?.id ?? null,
         factors: snapshot.factors.length > 0 ? snapshot.factors : FACTORS,
         activeFactor: snapshot.factors[0]?.id ?? "tono",
+        curve: "closed",
+        steers: [],
         docs: snapshot.docs,
         checks: initialChecks(lines, cursor, snapshot.factors.length > 0 ? snapshot.factors : FACTORS),
       };

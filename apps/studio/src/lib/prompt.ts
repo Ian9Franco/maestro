@@ -35,6 +35,7 @@ type BeatInput = {
   factors: Factor[];
   docs: SourceDoc[];
   activeFactor: FactorId;
+  steers: FactorId[];
   variant: number;
 };
 
@@ -52,10 +53,12 @@ export function composeBeat(input: BeatInput): Beat {
 
   const steer = input.factors.find((factor) => factor.id === input.activeFactor)?.value ?? 0;
   const context = topContext(input.docs, steer);
-  const rumbo = input.factors
-    .map((factor) => {
+  const rumbo = input.steers
+    .flatMap((id) => {
+      const factor = input.factors.find((item) => item.id === id);
+      if (!factor) return [];
       const readout = factorReadout(factor);
-      return `${factor.name} ${readout.word} ${readout.pct}%`;
+      return [`${factor.name} ${readout.word} ${readout.pct}%`];
     })
     .join(" · ");
 

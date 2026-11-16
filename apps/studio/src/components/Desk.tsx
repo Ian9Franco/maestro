@@ -1,11 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Arc } from "@/components/Arc";
 import { ContextDrawer } from "@/components/ContextDrawer";
 import { ContextVectors } from "@/components/ContextVectors";
 import { Factors } from "@/components/Factors";
 import { Manuscript } from "@/components/Manuscript";
+import { Origin } from "@/components/Origin";
 import { PromptPanel } from "@/components/PromptPanel";
 import { Reel } from "@/components/Reel";
 import { Timeline } from "@/components/Timeline";
@@ -26,6 +26,8 @@ export function Desk() {
   const undo = useDesk((state) => state.undo);
   const setPage = useDesk((state) => state.setPage);
   const page = useDesk((state) => state.page);
+  const curve = useDesk((state) => state.curve);
+  const closeOrigin = useDesk((state) => state.closeOrigin);
   const [heights, setHeights] = useState<number[]>([]);
 
   useEffect(() => {
@@ -59,8 +61,11 @@ export function Desk() {
       if (event.key === "PageDown") setPage(page + 1);
       if (event.key === "PageUp") setPage(page - 1);
       if (event.key === "Escape") {
-        setDrawerOpen(false);
-        selectBox(null);
+        if (curve !== "closed") closeOrigin();
+        else {
+          setDrawerOpen(false);
+          selectBox(null);
+        }
       }
       if ((event.key === "Backspace" || event.key === "Delete") && selectedBoxId) {
         removeBox(selectedBoxId);
@@ -68,7 +73,7 @@ export function Desk() {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [page, removeBox, selectBox, selectedBoxId, setDrawerOpen, setPage, step, undo]);
+  }, [closeOrigin, curve, page, removeBox, selectBox, selectedBoxId, setDrawerOpen, setPage, step, undo]);
 
   return (
     <main
@@ -101,8 +106,7 @@ export function Desk() {
                 <Manuscript onHeight={onHeight} />
               </div>
             </div>
-            <aside className="sticky top-0 hidden h-[calc(100vh-1.75rem)] w-[300px] flex-col md:flex">
-              <div className="absolute top-0 bottom-0 left-0 w-px bg-[#ff2d2d]/85 shadow-[0_0_10px_rgba(255,40,30,0.55)]" />
+            <aside className="sticky top-0 hidden h-[calc(100vh-1.75rem)] w-[300px] flex-col border-l border-white/10 md:flex">
               <button
                 type="button"
                 className="px-4 pt-4 text-left text-[11px] tracking-wide text-white/40 transition-colors hover:text-white/80"
@@ -118,9 +122,7 @@ export function Desk() {
       </div>
 
       <ContextVectors />
-      <div className="pointer-events-none absolute inset-x-0 bottom-7 z-20 flex justify-center">
-        <Arc />
-      </div>
+      <Origin />
       <Timeline />
       <ContextDrawer />
     </main>
