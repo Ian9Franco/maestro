@@ -1,9 +1,9 @@
 "use client";
 
 import { AnimatePresence, motion } from "motion/react";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { useDesk } from "@/lib/store";
-import { wordsOf } from "@/lib/text";
+import { type AttentionBox, wordsOf } from "@/lib/text";
 
 type WordRect = {
   line: number;
@@ -14,9 +14,13 @@ type WordRect = {
   h: number;
 };
 
+type Point = { x: number; y: number };
+
 type Drag =
   | { kind: "move"; id: string; dx: number; dy: number; x: number; y: number }
   | { kind: "weight"; id: string; startX: number; startWeight: number };
+
+type Landing = { id: string; fromX: number; fromY: number; started: number };
 
 export function Manuscript({ onHeight }: { onHeight: (index: number, height: number) => void }) {
   const lines = useDesk((state) => state.lines);
@@ -24,7 +28,6 @@ export function Manuscript({ onHeight }: { onHeight: (index: number, height: num
   const freshIndex = useDesk((state) => state.freshIndex);
   const boxes = useDesk((state) => state.boxes);
   const selectedBoxId = useDesk((state) => state.selectedBoxId);
-  const checks = useDesk((state) => state.checks);
   const addBox = useDesk((state) => state.addBox);
   const moveBox = useDesk((state) => state.moveBox);
   const setBoxWeight = useDesk((state) => state.setBoxWeight);
@@ -36,8 +39,11 @@ export function Manuscript({ onHeight }: { onHeight: (index: number, height: num
   const wordsRef = useRef<WordRect[]>([]);
   const dragRef = useRef<Drag | null>(null);
   const [words, setWords] = useState<WordRect[]>([]);
+  const [caret, setCaret] = useState<Point | null>(null);
+  const [railX, setRailX] = useState(0);
   const [drag, setDrag] = useState<Drag | null>(null);
-  const [snapping, setSnapping] = useState(false);
+  const [landing, setLanding] = useState<Landing | null>(null);
+  const [, setFrame] = useState(0);
 
   const measure = useCallback(() => {
     const content = contentRef.current;
@@ -58,8 +64,20 @@ export function Manuscript({ onHeight }: { onHeight: (index: number, height: num
     content.querySelectorAll<HTMLElement>("[data-row]").forEach((element) => {
       onHeight(Number(element.dataset.row), element.getBoundingClientRect().height);
     });
+    const caretEl = content.querySelector<HTMLElement>("[data-caret]");
+    const nextCaret = caretEl
+      ? {
+          x: caretEl.getBoundingClientRect().left - origin.left,
+          y: caretEl.getBoundingClientRect().top - origin.top + caretEl.getBoundingClientRect().height / 2,
+        }
+      : null;
     wordsRef.current = next;
     setWords((current) => (sameWords(current, next) ? current : next));
+    setCaret((current) => (samePoint(current, nextCaret) ? current : nextCaret));
+    setRailX((current) => {
+      const nextRail = Math.max(0, content.clientWidth - 2);
+      return Math.abs(current - nextRail) < 0.5 ? current : nextRail;
+    });
   }, [onHeight]);
 
   useLayoutEffect(() => {
@@ -82,34 +100,59 @@ export function Manuscript({ onHeight }: { onHeight: (index: number, height: num
   }, [measure]);
 
   useEffect(() => {
+    if (freshIndex === null) return;
+    let frame = 0;
+    const tick = () => {
+      measure();
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [freshIndex, measure]);
+
+  useEffect(() => {
+    if (!landing) return;
+    let frame = 0;
+    const tick = () => {
+      if (performance.now() - landing.started >= 220) {
+        setLanding(null);
+        return;
+      }
+      setFrame((value) => value + 1);
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [landing]);
+
+  useEffect(() => {
     function move(event: PointerEvent) {
       const current = dragRef.current;
       if (!current) return;
       if (current.kind === "move") {
-        const next = { ...current, x: event.clientX - current.dx, y: event.clientY - current.dy };
+        const origin = contentRef.current?.getBoundingClientRect();
+        if (!origin) return;
+        const next = {
+          ...current,
+          x: event.clientX - current.dx - origin.left,
+          y: event.clientY - current.dy - origin.top,
+        };
         dragRef.current = next;
         setDrag(next);
         return;
       }
       setBoxWeight(current.id, current.startWeight + (event.clientX - current.startX) / 140);
     }
-    function up(event: PointerEvent) {
+    function up() {
       const current = dragRef.current;
       if (!current) return;
       dragRef.current = null;
       if (current.kind === "move") {
-        const content = contentRef.current;
-        if (content) {
-          const origin = content.getBoundingClientRect();
-          const target = closestWord(
-            wordsRef.current,
-            event.clientX - origin.left,
-            event.clientY - origin.top,
-          );
-          if (target) moveBox(current.id, target.line, target.word);
+        const target = closestWord(wordsRef.current, current.x, current.y);
+        if (target) {
+          setLanding({ id: current.id, fromX: current.x, fromY: current.y, started: performance.now() });
+          moveBox(current.id, target.line, target.word);
         }
-        setSnapping(true);
-        window.setTimeout(() => setSnapping(false), 200);
       }
       setDrag(null);
     }
@@ -121,128 +164,170 @@ export function Manuscript({ onHeight }: { onHeight: (index: number, height: num
     };
   }, [moveBox, setBoxWeight]);
 
+  function beginMove(event: ReactPointerEvent<HTMLElement>, id: string) {
+    const content = contentRef.current;
+    if (!content) return;
+    event.preventDefault();
+    const origin = content.getBoundingClientRect();
+    const rect = event.currentTarget.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    const next: Drag = {
+      kind: "move",
+      id,
+      dx: event.clientX - centerX,
+      dy: event.clientY - centerY,
+      x: centerX - origin.left,
+      y: centerY - origin.top,
+    };
+    dragRef.current = next;
+    setDrag(next);
+    selectBox(id);
+  }
+
+  function beginWeight(event: ReactPointerEvent<HTMLElement>, id: string, weight: number) {
+    event.stopPropagation();
+    event.preventDefault();
+    const next: Drag = { kind: "weight", id, startX: event.clientX, startWeight: weight };
+    dragRef.current = next;
+    setDrag(next);
+  }
+
+  function vectorEnd(box: AttentionBox): Point | null {
+    if (drag?.kind === "move" && drag.id === box.id) return { x: drag.x, y: drag.y };
+    const word = words.find((item) => item.line === box.lineIndex && item.word === box.wordIndex);
+    if (!word) return null;
+    const anchor = { x: word.x + word.w, y: word.y + word.h / 2 };
+    if (landing?.id !== box.id) return anchor;
+    const t = Math.min(1, (performance.now() - landing.started) / 200);
+    const eased = 1 - (1 - t) ** 3;
+    return {
+      x: landing.fromX + (anchor.x - landing.fromX) * eased,
+      y: landing.fromY + (anchor.y - landing.fromY) * eased,
+    };
+  }
+
+  const ordered = [...boxes].sort((a, b) => Number(a.id === selectedBoxId) - Number(b.id === selectedBoxId));
+
   return (
-    <div ref={contentRef} className="relative min-w-0 flex-1 pb-8">
-      <div className="flex h-16 items-end px-14 pb-2 text-xs text-white/35">
-        Doble clic en una palabra para fijar la atención.
-      </div>
+    <div
+      ref={contentRef}
+      className="relative min-w-0 pb-36"
+      title="Doble clic en una palabra para fijar la atención."
+    >
+      <div className="h-8" />
       <AnimatePresence initial={false}>
         {lines.slice(0, cursor).map((line, index) => (
           <motion.div
             key={index}
-            exit={{ opacity: 0, y: -8 }}
+            exit={{ opacity: 0, y: -6 }}
             transition={{ duration: 0.15 }}
             data-row={index}
-            className="flex items-start gap-4 px-2 py-2"
+            className="flex items-start gap-3 py-px pr-4"
           >
-            <span className="mono w-8 shrink-0 pt-0.5 text-right text-xs text-white/30">
+            <span className="mono w-6 shrink-0 text-right text-[11px] leading-[22px] text-white/30 tabular-nums">
               {index + 1}
             </span>
-            <p className="mono text-[15px] leading-7 text-zinc-100">
+            <p className="mono min-w-0 flex-1 text-[13.5px] leading-[22px] tracking-[-0.01em] text-[#d4d4d4]">
               {freshIndex === index ? (
                 <TypedLine text={line} onDone={settleFresh} />
               ) : (
-                <LineWords line={line} index={index} boxes={boxes} onCreate={addBox} />
+                <LineWords
+                  line={line}
+                  index={index}
+                  boxes={boxes}
+                  selectedBoxId={selectedBoxId}
+                  onCreate={addBox}
+                  onDragStart={beginMove}
+                />
               )}
-              <Checks hits={checks[index]} />
+              {index === cursor - 1 ? (
+                <span data-caret className="inline-block h-[1em] w-px align-middle" />
+              ) : null}
             </p>
           </motion.div>
         ))}
       </AnimatePresence>
 
-      <svg className="pointer-events-none absolute inset-0 h-full w-full overflow-visible">
-        {boxes.map((box) => {
-          const word = words.find((item) => item.line === box.lineIndex && item.word === box.wordIndex);
-          if (!word || drag?.kind === "move" && drag.id === box.id) return null;
-          const x2 = word.x + word.w / 2;
-          const y2 = word.y;
-          const x1 = word.x + 8;
-          const y1 = word.y - 2;
-          return (
-            <line
-              key={box.id}
-              x1={x1}
-              y1={y1}
-              x2={x2}
-              y2={y2}
-              stroke="rgba(186, 220, 255, 0.7)"
-              strokeWidth="1"
-              strokeDasharray="3 4"
+      <svg className="pointer-events-none absolute inset-0 h-full w-full overflow-visible" aria-hidden>
+        {caret
+          ? ordered.map((box, order) => {
+              const end = vectorEnd(box);
+              if (!end) return null;
+              const selected = box.id === selectedBoxId;
+              const d = attentionPath(caret, end, order, railX);
+              return (
+                <g key={box.id}>
+                  <path
+                    d={d}
+                    fill="none"
+                    stroke="#ff4b2a"
+                    strokeWidth={3 + box.weight * 2}
+                    strokeLinecap="round"
+                    opacity={0.13}
+                  />
+                  <path
+                    d={d}
+                    fill="none"
+                    stroke="#ff5530"
+                    strokeWidth={0.75 + box.weight * 1.15}
+                    strokeLinecap="round"
+                    opacity={selected ? 0.95 : 0.7}
+                  />
+                  <circle cx={end.x} cy={end.y} r={selected ? 2.6 : 2} fill="#ff5530" />
+                </g>
+              );
+            })
+          : null}
+        {caret ? (
+          <g>
+            <circle
+              cx={caret.x}
+              cy={caret.y}
+              r={freshIndex !== null ? 8 : 6.5}
+              fill="none"
+              stroke="#ff4b2a"
+              strokeWidth={freshIndex !== null ? 1.6 : 1.15}
+              opacity={0.9}
             />
-          );
-        })}
+            <circle cx={caret.x} cy={caret.y} r={2.6} fill="#fff" />
+          </g>
+        ) : null}
       </svg>
 
       {boxes.map((box) => {
         const word = words.find((item) => item.line === box.lineIndex && item.word === box.wordIndex);
-        if (!word) return null;
-        const moving = drag?.kind === "move" && drag.id === box.id;
-        const left = moving ? drag.x - (contentRef.current?.getBoundingClientRect().left ?? 0) : word.x;
-        const top = moving ? drag.y - (contentRef.current?.getBoundingClientRect().top ?? 0) : word.y - 16;
-        const selected = box.id === selectedBoxId;
+        if (!word || box.id !== selectedBoxId) return null;
+        if (drag?.kind === "move" && drag.id === box.id) return null;
         return (
-          <div
-            key={box.id}
-            className="absolute z-10"
-              style={{
-              left: left - 4,
-              top,
-              width: word.w + 8,
-              transition: snapping && !moving ? "left 200ms cubic-bezier(0.2, 1.3, 0.3, 1), top 200ms cubic-bezier(0.2, 1.3, 0.3, 1)" : "none",
-            }}
-            onPointerDown={(event) => {
-              if ((event.target as HTMLElement).dataset.handle === "weight") return;
-              event.stopPropagation();
-              selectBox(box.id);
-              const rect = event.currentTarget.getBoundingClientRect();
-              const next: Drag = {
-                kind: "move",
-                id: box.id,
-                dx: event.clientX - rect.left,
-                dy: event.clientY - rect.top,
-                x: rect.left,
-                y: rect.top,
-              };
-              dragRef.current = next;
-              setDrag(next);
-            }}
-          >
-            <div className="mb-0.5 text-[10px] leading-none text-sky-100/90">Atención: {box.weight.toFixed(1)}</div>
-            <div
-              className="relative rounded-sm border bg-sky-200/10"
-              style={{
-                height: Math.max(word.h, 22),
-                borderColor: selected ? "rgba(220,240,255,0.95)" : "rgba(170,210,255,0.65)",
+          <div key={box.id}>
+            <button
+              type="button"
+              aria-label="Quitar atención"
+              className="absolute z-20 flex h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-[#ff5a32]/80 bg-black text-[9px] leading-none text-[#ffb7a4]"
+              style={{ left: word.x + word.w - 1, top: word.y - 1 }}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation();
+                removeBox(box.id);
               }}
             >
-              <button
-                type="button"
-                aria-label="Quitar caja"
-                className="absolute -top-2 -right-2 flex h-4 w-4 items-center justify-center rounded-full bg-zinc-800 text-[10px] text-white"
-                onPointerDown={(event) => event.stopPropagation()}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  removeBox(box.id);
-                }}
-              >
-                ×
-              </button>
-              <span
-                data-handle="weight"
-                className="absolute right-0 bottom-0 h-2.5 w-2.5 cursor-ew-resize bg-sky-100"
-                onPointerDown={(event) => {
-                  event.stopPropagation();
-                  const next: Drag = {
-                    kind: "weight",
-                    id: box.id,
-                    startX: event.clientX,
-                    startWeight: box.weight,
-                  };
-                  dragRef.current = next;
-                  setDrag(next);
-                }}
-              />
-            </div>
+              ×
+            </button>
+            <span
+              data-handle="weight"
+              title={`Atención ${box.weight.toFixed(1)}`}
+              aria-label="Peso de atención"
+              role="slider"
+              aria-valuemin={0.15}
+              aria-valuemax={1}
+              aria-valuenow={Number(box.weight.toFixed(2))}
+              className="absolute z-20 flex h-4 w-4 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize items-center justify-center"
+              style={{ left: word.x + word.w / 2, top: word.y + word.h + 4 }}
+              onPointerDown={(event) => beginWeight(event, box.id, box.weight)}
+            >
+              <span className="h-2 w-2 rounded-full bg-[#ff5a32] shadow-[0_0_8px_rgba(255,80,40,0.85)]" />
+            </span>
           </div>
         );
       })}
@@ -254,29 +339,45 @@ function LineWords({
   line,
   index,
   boxes,
+  selectedBoxId,
   onCreate,
+  onDragStart,
 }: {
   line: string;
   index: number;
-  boxes: { lineIndex: number; wordIndex: number }[];
+  boxes: AttentionBox[];
+  selectedBoxId: string | null;
   onCreate: (lineIndex: number, wordIndex: number) => void;
+  onDragStart: (event: ReactPointerEvent<HTMLElement>, id: string) => void;
 }) {
   const words = wordsOf(line);
   return (
     <>
       {words.map((word, wordIndex) => {
-        const marked = boxes.some((box) => box.lineIndex === index && box.wordIndex === wordIndex);
+        const box = boxes.find((item) => item.lineIndex === index && item.wordIndex === wordIndex);
+        const marked = Boolean(box);
+        const selected = box?.id === selectedBoxId;
         return (
           <span key={`${word}-${wordIndex}`}>
             <span
               role="button"
               tabIndex={0}
-              aria-label={`Fijar ${word}`}
+              aria-label={marked ? `Mover atención de ${word}` : `Fijar ${word}`}
               data-word-index={wordIndex}
               data-line={index}
-              className="cursor-pointer rounded-sm"
-              style={{ background: marked ? "rgba(140, 200, 255, 0.22)" : undefined }}
-              onDoubleClick={() => onCreate(index, wordIndex)}
+              className={`rounded-sm ${marked ? "cursor-grab touch-none text-white" : "cursor-pointer"}`}
+              style={{
+                boxShadow: marked ? "inset 0 -1px 0 rgba(255,92,48,0.95)" : undefined,
+                background: selected ? "rgba(255,70,40,0.14)" : undefined,
+              }}
+              onDoubleClick={(event) => {
+                event.preventDefault();
+                onCreate(index, wordIndex);
+              }}
+              onPointerDown={(event) => {
+                if (!box) return;
+                onDragStart(event, box.id);
+              }}
               onKeyDown={(event) => {
                 if (event.key === "Enter") onCreate(index, wordIndex);
               }}
@@ -316,25 +417,6 @@ function TypedLine({ text, onDone }: { text: string; onDone: () => void }) {
   );
 }
 
-function Checks({ hits }: { hits?: { tono: boolean; tension: boolean; foco: boolean } }) {
-  if (!hits) return null;
-  const marks = [
-    hits.tono ? "tono" : null,
-    hits.tension ? "tensión" : null,
-    hits.foco ? "foco" : null,
-  ].filter((mark): mark is string => Boolean(mark));
-  if (marks.length === 0) return null;
-  return (
-    <span className="ml-2 inline-flex gap-1 align-middle">
-      {marks.map((mark) => (
-        <span key={mark} title={mark} className="text-[11px] text-emerald-400">
-          ✓
-        </span>
-      ))}
-    </span>
-  );
-}
-
 function sameWords(current: WordRect[], next: WordRect[]) {
   if (current.length !== next.length) return false;
   return current.every((item, index) => {
@@ -349,6 +431,17 @@ function sameWords(current: WordRect[], next: WordRect[]) {
       Math.abs(item.h - other.h) < 0.5
     );
   });
+}
+
+function attentionPath(from: Point, to: Point, order: number, rail: number) {
+  const right = Math.max(from.x, to.x);
+  const bend = Math.min(rail - 4, right + 42 + order * 18);
+  return `M ${from.x} ${from.y} C ${bend} ${from.y}, ${bend} ${to.y}, ${to.x} ${to.y}`;
+}
+
+function samePoint(current: Point | null, next: Point | null) {
+  if (current === null || next === null) return current === next;
+  return Math.abs(current.x - next.x) < 0.5 && Math.abs(current.y - next.y) < 0.5;
 }
 
 function closestWord(words: WordRect[], x: number, y: number) {

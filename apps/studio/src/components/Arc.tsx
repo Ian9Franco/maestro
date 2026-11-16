@@ -4,9 +4,11 @@ import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react"
 import { useDesk } from "@/lib/store";
 import { clamp, factorReadout } from "@/lib/text";
 
-const CX = 220;
-const CY = 132;
-const R = 108;
+const W = 420;
+const H = 132;
+const CX = 210;
+const CY = 108;
+const R = 84;
 
 export function Arc() {
   const factors = useDesk((state) => state.factors);
@@ -17,13 +19,19 @@ export function Arc() {
   const [dragging, setDragging] = useState(false);
   const [kick, setKick] = useState(0);
   const velocity = useRef(0);
-  const previous = useRef(factor.value);
+  const previous = useRef(factor?.value ?? 0);
 
   if (!factor) return null;
   const shown = clamp(factor.value + kick, -1, 1);
   const point = pointOnArc(shown);
   const readout = factorReadout({ ...factor, value: shown });
-  const magnitude = Math.abs(shown);
+  const tone = factors.find((item) => item.id === "tono")?.value ?? 0;
+  const tension = Math.abs(factors.find((item) => item.id === "tension")?.value ?? 0);
+  const ring = 12 + tension * 36;
+  const ringColor =
+    tone < -0.08 ? "rgba(255,176,196,0.82)" : tone > 0.08 ? "rgba(255,64,48,0.9)" : "rgba(255,255,255,0.7)";
+  const glow =
+    tone < -0.08 ? "0 0 16px rgba(255,160,180,0.4)" : "0 0 16px rgba(255,60,40,0.45)";
 
   function valueFromEvent(event: ReactPointerEvent<SVGSVGElement>) {
     const svg = svgRef.current;
@@ -40,11 +48,14 @@ export function Arc() {
   }
 
   return (
-    <div className="pointer-events-none relative mx-auto h-[168px] w-[440px] max-w-full">
+    <div
+      className="pointer-events-none relative w-[min(420px,92vw)]"
+      style={{ aspectRatio: `${W} / ${H}` }}
+    >
       <svg
         ref={svgRef}
-        viewBox="0 0 440 168"
-        className="pointer-events-auto h-[168px] w-full cursor-grab touch-none active:cursor-grabbing"
+        viewBox={`0 0 ${W} ${H}`}
+        className="pointer-events-auto absolute inset-0 h-full w-full cursor-grab touch-none active:cursor-grabbing"
         onPointerDown={(event) => {
           event.currentTarget.setPointerCapture(event.pointerId);
           setDragging(true);
@@ -76,15 +87,10 @@ export function Arc() {
             <stop offset="100%" stopColor="#9aa6c9" />
           </linearGradient>
         </defs>
-        <path
-          d={arcPath()}
-          fill="none"
-          stroke="url(#tone-arc)"
-          strokeWidth="1.4"
-        />
+        <path d={arcPath()} fill="none" stroke="url(#tone-arc)" strokeWidth="1.2" />
         {[0, 0.25, 0.5, 0.75, 1].map((mark) => {
-          const outer = pointOnArc(mark * 2 - 1, R + 8);
-          const inner = pointOnArc(mark * 2 - 1, R - 6);
+          const outer = pointOnArc(mark * 2 - 1, R + 7);
+          const inner = pointOnArc(mark * 2 - 1, R - 5);
           return (
             <line
               key={mark}
@@ -92,39 +98,43 @@ export function Arc() {
               y1={inner.y}
               x2={outer.x}
               y2={outer.y}
-              stroke="rgba(255,255,255,0.35)"
+              stroke="rgba(255,255,255,0.28)"
               strokeWidth="1"
             />
           );
         })}
-        <text x="28" y="154" fill="rgba(255,255,255,0.55)" fontSize="13">
+        <text x="16" y="124" fill="rgba(255,255,255,0.42)" fontSize="11">
           {factor.neg}
         </text>
-        <text x="360" y="154" fill="rgba(255,255,255,0.55)" fontSize="13">
+        <text x={W - 16} y="124" textAnchor="end" fill="rgba(255,255,255,0.42)" fontSize="11">
           {factor.pos}
         </text>
-        <text x="220" y="158" textAnchor="middle" fill="rgba(255,255,255,0.78)" fontSize="13">
+        <text x={CX} y="124" textAnchor="middle" fill="rgba(255,255,255,0.72)" fontSize="11">
           {factor.name}: {readout.word} {readout.pct}%
         </text>
       </svg>
-      <div
-        className="pointer-events-none absolute"
-        style={{
-          left: point.x,
-          top: point.y,
-          transition: dragging ? "none" : "left 250ms cubic-bezier(0.2, 1.35, 0.36, 1), top 250ms cubic-bezier(0.2, 1.35, 0.36, 1)",
-        }}
-      >
+      <div className="pointer-events-none absolute inset-0">
         <div
-          className="absolute -translate-x-1/2 -translate-y-1/2 rounded-full border"
+          className="absolute"
           style={{
-            width: 16 + magnitude * 30,
-            height: 16 + magnitude * 30,
-            borderColor: shown < 0 ? "rgba(255,160,180,0.75)" : "rgba(255,70,50,0.8)",
-            boxShadow: shown < 0 ? "0 0 16px rgba(255,150,170,0.35)" : "0 0 16px rgba(255,60,40,0.4)",
+            left: `${(point.x / W) * 100}%`,
+            top: `${(point.y / H) * 100}%`,
+            transition: dragging
+              ? "none"
+              : "left 250ms cubic-bezier(0.2, 1.35, 0.36, 1), top 250ms cubic-bezier(0.2, 1.35, 0.36, 1)",
           }}
-        />
-        <div className="absolute h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow-[0_0_12px_rgba(255,255,255,0.8)]" />
+        >
+          <div
+            className="absolute -translate-x-1/2 -translate-y-1/2 rounded-full border"
+            style={{
+              width: ring,
+              height: ring,
+              borderColor: ringColor,
+              boxShadow: glow,
+            }}
+          />
+          <div className="absolute h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow-[0_0_12px_rgba(255,255,255,0.85)]" />
+        </div>
       </div>
     </div>
   );

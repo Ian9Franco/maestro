@@ -5,14 +5,16 @@ import { useDesk } from "@/lib/store";
 import {
   type AttentionBox,
   barColor,
+  hashString,
   normalizeP95,
   rawLineScore,
   rawSpanScore,
+  sparkProfile,
   type SourceDoc,
 } from "@/lib/text";
 
 const REEL_HINT =
-  "Muestra qué partes de tu historia influyen más en la próxima generación. Arrastra las cajas para cambiar el foco.";
+  "Muestra qué partes de tu historia influyen más en la próxima generación. Arrastra las palabras marcadas para cambiar el foco.";
 
 type SourceBar = {
   key: string;
@@ -49,12 +51,21 @@ export function Reel({ heights }: { heights: number[] }) {
     docs: { id: string; spans: string[] }[];
   };
 
-  const lineHeights = useMemo(() => {
+  const energies = useMemo(() => {
     const raw = lines
       .slice(0, parsed.revealed)
       .map((line, index) => rawLineScore(line, index, parsed.boxes, parsed.factorValue));
-    return normalizeP95(raw).map((score) => 24 + score * 0.76);
+    return normalizeP95(raw);
   }, [lines, parsed]);
+
+  const hot = useMemo(() => {
+    const ranked = energies
+      .map((value, index) => ({ value, index }))
+      .filter((item) => item.index < cursor && item.value > 55)
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 3);
+    return new Set(ranked.map((item) => item.index));
+  }, [cursor, energies]);
 
   const sourceBars = useMemo(() => {
     const fromDocs: SourceDoc[] = parsed.docs.map((doc) => ({
@@ -70,58 +81,71 @@ export function Reel({ heights }: { heights: number[] }) {
   const [tip, setTip] = useState<{ x: number; y: number; title: string; body: string } | null>(null);
 
   return (
-    <div className="w-[76px] shrink-0" title={REEL_HINT} aria-label={REEL_HINT}>
-      <div className="flex h-16 items-end gap-1 px-2 pb-2">
-        {sourceBars.map((bar) => (
-          <button
-            key={bar.key}
-            type="button"
-            className="relative h-12 w-2 rounded-sm bg-white/5"
-            onMouseEnter={(event) =>
-              setTip({
-                x: event.clientX,
-                y: event.clientY,
-                title: bar.docName,
-                body: bar.span,
-              })
-            }
-            onMouseLeave={() => setTip(null)}
-          >
-            <Bar percent={bar.height} cached={false} />
-          </button>
-        ))}
+    <div className="w-[56px] shrink-0 sm:w-[112px]" title={REEL_HINT} aria-label={REEL_HINT}>
+      <div className="flex h-8 items-end justify-end gap-px pr-2">
+        <span className="hidden w-8 sm:block" />
+        <span className="flex h-5 w-[34px] items-end justify-center gap-px">
+          {sourceBars.map((bar) => (
+            <button
+              key={bar.key}
+              type="button"
+              className="relative h-full w-[2px]"
+              aria-label={`${bar.docName}: ${bar.span}`}
+              onMouseEnter={(event) =>
+                setTip({ x: event.clientX, y: event.clientY, title: bar.docName, body: bar.span })
+              }
+              onMouseLeave={() => setTip(null)}
+            >
+            <span
+              className="bar-fill absolute inset-x-0 bottom-0 rounded-[1px]"
+              style={{
+                height: "100%",
+                ["--s" as string]: scaleOf(bar.height / 100),
+                background: barColor(Math.round(bar.height)),
+              }}
+            />
+            </button>
+          ))}
+        </span>
       </div>
-      <div className={freshIndex !== null ? "reel-shimmer" : undefined}>
-        {lineHeights.map((percent, index) => (
+      {energies.map((energy, index) => {
+        const cached = index >= cursor;
+        const line = lines[index] ?? "";
+        const shown = Number(energy.toFixed(2));
+        return (
           <div
             key={index}
-            className="flex items-center justify-center"
-            style={{ height: heights[index] ?? 36 }}
+            className={freshIndex === index ? "reel-shimmer relative" : "relative"}
+            style={{ height: index < cursor ? (heights[index] ?? 22) : 22 }}
           >
             <button
               type="button"
-              className="relative h-[70%] w-2.5 rounded-sm bg-white/5"
+              className="flex h-full w-full items-center justify-end gap-1.5 pr-2"
+              aria-label={`Línea ${index + 1}, atención ${Math.round(shown)}`}
               onMouseEnter={(event) =>
                 setTip({
                   x: event.clientX,
                   y: event.clientY,
-                  title: `Línea ${index + 1} · ${Math.round(percent)}`,
-                  body: lines[index] ?? "",
+                  title: `Línea ${index + 1} · ${Math.round(shown)}`,
+                  body: line,
                 })
               }
               onMouseLeave={() => setTip(null)}
             >
-              <Bar percent={percent} cached={index >= cursor} />
+              <span className="hidden w-8 text-right text-[10px] text-[#ff6a3c] tabular-nums sm:inline">
+                {hot.has(index) ? stamp(index, line) : ""}
+              </span>
+              <Sticks seed={line || String(index)} energy={shown} cached={cached} />
             </button>
           </div>
-        ))}
-      </div>
+        );
+      })}
       {tip ? (
         <div
-          className="pointer-events-none fixed z-50 max-w-xs rounded-md border border-white/10 bg-black/90 px-3 py-2 text-xs text-white/80 shadow-lg"
-          style={{ left: tip.x + 16, top: tip.y + 12 }}
+          className="pointer-events-none fixed z-50 max-w-xs rounded border border-white/10 bg-black/95 px-3 py-2 text-xs text-white/75"
+          style={{ left: tip.x + 14, top: tip.y + 12 }}
         >
-          <div className="mb-1 text-[10px] uppercase tracking-wide text-white/45">{tip.title}</div>
+          <div className="mb-1 text-[10px] tracking-wide text-white/40 uppercase">{tip.title}</div>
           {tip.body}
         </div>
       ) : null}
@@ -129,20 +153,46 @@ export function Reel({ heights }: { heights: number[] }) {
   );
 }
 
-function Bar({ percent, cached }: { percent: number; cached: boolean }) {
-  const scale = Math.max(0.04, percent / 100);
+function Sticks({ seed, energy, cached }: { seed: string; energy: number; cached: boolean }) {
+  const profile = sparkProfile(cached ? `${seed}:cache` : seed, 11);
   return (
-    <span
-      className="bar-fill absolute inset-x-0 bottom-0 rounded-sm"
-      style={{
-        ["--s" as string]: scale,
-        height: "100%",
-        background: cached ? "#8a8a8a" : barColor(percent),
-        opacity: cached ? 0.3 : 1,
-        boxShadow: !cached && percent > 70 ? "0 0 8px rgba(255, 90, 50, 0.55)" : undefined,
-      }}
-    />
+    <span className="flex h-4 w-[34px] items-end gap-px" aria-hidden>
+      {profile.map((value, index) => {
+        const scale = cached ? 0.2 + value * 0.25 : 0.12 + value * (0.18 + energy / 130);
+        const amount = Math.round(value * energy);
+        return (
+          <span key={index} className="relative h-full w-[2px]">
+            <span
+              className="bar-fill absolute inset-x-0 bottom-0 rounded-[1px]"
+              style={{
+                height: "100%",
+                ["--s" as string]: scaleOf(scale),
+                background: cached ? "#6a6a6a" : stickColor(amount),
+                ...(cached ? { opacity: 0.35 } : null),
+                ...(!cached && amount > 62 ? { boxShadow: "0 0 6px rgba(255,70,40,0.7)" } : null),
+              }}
+            />
+          </span>
+        );
+      })}
+    </span>
   );
+}
+
+function scaleOf(value: number) {
+  return Math.max(0.08, Math.min(1, value)).toFixed(4);
+}
+
+function stickColor(amount: number): string {
+  if (amount > 55) return "#ff3b2a";
+  if (amount > 32) return "#ff6a32";
+  if (amount > 16) return "#a84832";
+  return "#3e3938";
+}
+
+function stamp(index: number, line: string) {
+  const frac = (hashString(`${line}:t`) % 80) / 100;
+  return (0.35 + index * 0.37 + frac).toFixed(2);
 }
 
 function topSourceBars(docs: SourceDoc[], factorValue: number): SourceBar[] {

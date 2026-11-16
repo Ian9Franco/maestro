@@ -143,6 +143,16 @@ export function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
+export function sparkProfile(seed: string, count = 12): number[] {
+  const bars: number[] = [];
+  for (let index = 0; index < count; index += 1) {
+    const noise = (hashString(`${seed}:${index}`) % 1000) / 1000;
+    const shape = 0.3 + 0.7 * Math.abs(Math.sin(index * 0.9 + noise * 5));
+    bars.push(Math.min(1, 0.15 + noise * shape));
+  }
+  return bars;
+}
+
 export function barColor(percent: number): string {
   const t = percent / 100;
   if (t < 0.45) return mix("#5a463f", "#ff7a3c", t / 0.45);

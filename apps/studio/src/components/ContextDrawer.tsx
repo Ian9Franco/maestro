@@ -25,7 +25,7 @@ export function ContextDrawer() {
   if (!open) return null;
 
   return (
-    <aside className="absolute top-12 right-0 bottom-11 z-40 flex w-[380px] flex-col border-l border-white/10 bg-[#0c0c0c]/95 shadow-2xl backdrop-blur-md">
+    <aside className="absolute top-0 right-0 bottom-7 z-40 flex w-[380px] max-w-full flex-col border-l border-white/10 bg-black/95 shadow-2xl">
       <header className="flex items-start justify-between gap-3 border-b border-white/10 px-4 py-3">
         <div>
           <h2 className="text-sm text-white">Contexto</h2>

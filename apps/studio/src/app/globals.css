@@ -2,26 +2,24 @@
 
 :root {
   color-scheme: dark;
-  background: #0a0a0a;
+  background: #000;
 }
 
 html,
 body {
   height: 100%;
   margin: 0;
-  background: #0a0a0a;
+  background: #000;
 }
 
 body {
   font-family: var(--font-inter), sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
 
-.desk-grid {
-  background-color: #0a0a0a;
-  background-image:
-    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
-  background-size: 20px 20px;
+::selection {
+  background: rgba(255, 70, 40, 0.35);
+  color: #fff;
 }
 
 .mono {

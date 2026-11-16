@@ -13,8 +13,8 @@ import { type DocKind } from "@/lib/text";
 export function Desk() {
   const step = useDesk((state) => state.step);
   const docs = useDesk((state) => state.docs);
-  const drawerOpen = useDesk((state) => state.drawerOpen);
   const setDrawerOpen = useDesk((state) => state.setDrawerOpen);
+  const drawerOpen = useDesk((state) => state.drawerOpen);
   const addDoc = useDesk((state) => state.addDoc);
   const removeBox = useDesk((state) => state.removeBox);
   const selectedBoxId = useDesk((state) => state.selectedBoxId);
@@ -50,7 +50,7 @@ export function Desk() {
 
   return (
     <main
-      className="desk-grid relative h-screen overflow-hidden text-white"
+      className="relative h-screen overflow-hidden bg-black text-[#e6e6e6]"
       onDragOver={(event) => {
         if ([...event.dataTransfer.types].includes("Files")) event.preventDefault();
       }}
@@ -60,32 +60,39 @@ export function Desk() {
         void readDropped(event.dataTransfer.files, addDoc);
       }}
     >
-      <header className="absolute inset-x-0 top-0 z-30 flex h-12 items-center justify-between px-5">
-        <div className="text-sm tracking-wide text-white/80">Maestro</div>
-        <div className="flex items-center gap-2">
-          <button type="button" className="btn" onClick={() => step(-1)} aria-label="Línea anterior">
-            −
-          </button>
-          <button type="button" className="btn" onClick={() => step(1)} aria-label="Línea siguiente">
-            +
-          </button>
-          <button type="button" className="btn" onClick={() => setDrawerOpen(!drawerOpen)}>
-            Contexto · {docs.length}
-          </button>
-        </div>
-      </header>
-
-      <div className="absolute inset-x-0 top-12 bottom-[212px] grid grid-cols-[76px_minmax(0,1fr)_200px]">
-        <div data-scroller className="col-span-2 overflow-auto">
-          <div className="flex min-h-full items-start px-2 pt-2">
+      <div data-scroller className="absolute inset-x-0 top-0 bottom-7 overflow-x-hidden overflow-y-auto">
+        <div className="w-full">
+          <div className="flex items-center justify-between gap-3 px-3 pt-3 md:hidden">
+            <Factors layout="row" />
+            <button
+              type="button"
+              className="shrink-0 text-[11px] tracking-wide text-white/45"
+              onClick={() => setDrawerOpen(!drawerOpen)}
+            >
+              contexto · {docs.length}
+            </button>
+          </div>
+          <div className="flex items-start pl-1">
             <Reel heights={heights} />
-            <Manuscript onHeight={onHeight} />
+            <div className="min-w-0 w-full max-w-[760px]">
+              <Manuscript onHeight={onHeight} />
+            </div>
+            <aside className="sticky top-0 hidden h-[calc(100vh-1.75rem)] min-w-[190px] flex-1 flex-col md:flex">
+              <div className="absolute top-0 bottom-0 left-0 w-px bg-[#ff2d2d]/85 shadow-[0_0_10px_rgba(255,40,30,0.55)]" />
+              <button
+                type="button"
+                className="px-4 pt-4 text-left text-[11px] tracking-wide text-white/40 transition-colors hover:text-white/80"
+                onClick={() => setDrawerOpen(!drawerOpen)}
+              >
+                contexto · {docs.length}
+              </button>
+              <Factors />
+            </aside>
           </div>
         </div>
-        <div className="border-l border-white/10">{drawerOpen ? null : <Factors />}</div>
       </div>
 
-      <div className="pointer-events-none absolute inset-x-0 bottom-11 z-20 h-[168px]">
+      <div className="pointer-events-none absolute inset-x-0 bottom-7 z-20 flex justify-center">
         <Arc />
       </div>
       <Timeline />
