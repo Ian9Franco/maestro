@@ -31,14 +31,17 @@ export function Factors({ layout = "rail" }: { layout?: "rail" | "row" }) {
             type="button"
             aria-pressed={active}
             onClick={() => setActiveFactor(factor.id)}
+            data-factor={factor.id}
             className={`flex items-baseline gap-2 text-left leading-none transition-opacity hover:opacity-100 ${
               layout === "row" ? "text-[11px]" : "text-[13px]"
             } ${active ? "opacity-100" : "opacity-60"}`}
           >
             <span
-              className="h-1.5 w-1.5 shrink-0 translate-y-px rounded-full"
+              data-factor-dot={factor.id}
+              className="h-2 w-2 shrink-0 translate-y-px rounded-full border"
               style={{
-                background: DOT[factor.id],
+                background: active ? DOT[factor.id] : "transparent",
+                borderColor: DOT[factor.id],
                 boxShadow: active ? `0 0 8px ${DOT[factor.id]}` : undefined,
               }}
             />

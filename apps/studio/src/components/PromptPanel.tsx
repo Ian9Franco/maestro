@@ -47,6 +47,7 @@ export function PromptPanel() {
       docs: state.docs,
       cursor: state.cursor,
       variant: state.variant,
+      blocked: Object.keys(state.blocked).map(Number),
     };
   }
 

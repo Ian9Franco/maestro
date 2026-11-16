@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Arc } from "@/components/Arc";
 import { ContextDrawer } from "@/components/ContextDrawer";
+import { ContextVectors } from "@/components/ContextVectors";
 import { Factors } from "@/components/Factors";
 import { Manuscript } from "@/components/Manuscript";
 import { PromptPanel } from "@/components/PromptPanel";
@@ -22,6 +23,9 @@ export function Desk() {
   const selectedBoxId = useDesk((state) => state.selectedBoxId);
   const selectBox = useDesk((state) => state.selectBox);
   const applySnapshot = useDesk((state) => state.applySnapshot);
+  const undo = useDesk((state) => state.undo);
+  const setPage = useDesk((state) => state.setPage);
+  const page = useDesk((state) => state.page);
   const [heights, setHeights] = useState<number[]>([]);
 
   useEffect(() => {
@@ -45,8 +49,15 @@ export function Desk() {
     function onKey(event: KeyboardEvent) {
       const target = event.target as HTMLElement | null;
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z" && !event.shiftKey) {
+        event.preventDefault();
+        undo();
+        return;
+      }
       if (event.key === "ArrowRight") step(1);
       if (event.key === "ArrowLeft") step(-1);
+      if (event.key === "PageDown") setPage(page + 1);
+      if (event.key === "PageUp") setPage(page - 1);
       if (event.key === "Escape") {
         setDrawerOpen(false);
         selectBox(null);
@@ -57,7 +68,7 @@ export function Desk() {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [removeBox, selectBox, selectedBoxId, setDrawerOpen, step]);
+  }, [page, removeBox, selectBox, selectedBoxId, setDrawerOpen, setPage, step, undo]);
 
   return (
     <main
@@ -106,6 +117,7 @@ export function Desk() {
         </div>
       </div>
 
+      <ContextVectors />
       <div className="pointer-events-none absolute inset-x-0 bottom-7 z-20 flex justify-center">
         <Arc />
       </div>
@@ -130,6 +142,7 @@ function snapshotFrom(state: ReturnType<typeof useDesk.getState>): DeskSnapshot 
     docs: state.docs,
     cursor: state.cursor,
     variant: state.variant,
+    blocked: Object.keys(state.blocked).map(Number),
   };
 }
 
