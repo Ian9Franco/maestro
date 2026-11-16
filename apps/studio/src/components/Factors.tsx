@@ -38,7 +38,7 @@ export function Factors({ layout = "rail" }: { layout?: "rail" | "row" }) {
     <div
       className={
         layout === "row"
-          ? "flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2"
+          ? "mobile-chip-rail flex min-w-0 flex-1 items-center gap-3 overflow-x-auto overscroll-x-contain py-0.5"
           : "flex flex-col items-start gap-3 px-4 pt-4"
       }
     >
@@ -105,7 +105,7 @@ function Chip({
       type="button"
       onClick={onOpen}
       data-factor={link === "solid" ? factor.id : undefined}
-      className={`flex items-baseline gap-2 text-left text-[13px] leading-none transition-opacity hover:opacity-100 ${active ? "opacity-100" : "opacity-75"}`}
+      className={`flex min-h-11 min-w-max shrink-0 items-baseline gap-2 text-left text-[11px] leading-none transition-opacity hover:opacity-100 sm:min-h-0 sm:text-[13px] ${active ? "opacity-100" : "opacity-75"}`}
     >
       <span
         data-factor-dot={link === "solid" ? factor.id : undefined}

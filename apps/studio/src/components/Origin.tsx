@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { useDesk } from "@/lib/store";
 import { admitFactors, clamp, factorReadout, wordsOf, type Factor } from "@/lib/text";
+import { useCompactViewport } from "@/lib/viewport";
 
 type Point = { x: number; y: number };
 
@@ -21,6 +22,7 @@ export function Origin() {
   const dragging = useRef(false);
   const velocity = useRef(0);
   const previous = useRef(0);
+  const compact = useCompactViewport();
 
   useEffect(() => {
     if (curve === "closed") return;
@@ -58,8 +60,10 @@ export function Origin() {
 
   if (!caret || size.w === 0) return null;
 
-  const room = size.h - caret.y - 48;
-  const radius = Math.max(96, Math.min(148, room - 24));
+  const room = size.h - caret.y - (compact ? 72 : 48);
+  const radius = compact
+    ? Math.max(64, Math.min(108, room - 12))
+    : Math.max(96, Math.min(148, room - 24));
   const admitted = admitFactors(lines, cursor, factors);
   const ring = [...admitted];
   for (const id of steers) {
@@ -79,8 +83,22 @@ export function Origin() {
   return (
     <div className="pointer-events-none fixed inset-0 z-[25]">
       <svg className="h-full w-full overflow-visible" aria-hidden>
-        <line x1={caret.x} y1={0} x2={caret.x} y2={size.h - 28} stroke="rgba(255,45,45,0.78)" strokeWidth={1} />
-        <line x1={0} y1={caret.y} x2={size.w} y2={caret.y} stroke="rgba(255,45,45,0.5)" strokeWidth={1} />
+        <line
+          x1={caret.x}
+          y1={compact ? Math.max(0, caret.y - 120) : 0}
+          x2={caret.x}
+          y2={size.h - (compact ? 72 : 28)}
+          stroke="rgba(255,45,45,0.78)"
+          strokeWidth={1}
+        />
+        <line
+          x1={compact ? Math.max(0, caret.x - 140) : 0}
+          y1={caret.y}
+          x2={compact ? Math.min(size.w, caret.x + 140) : size.w}
+          y2={caret.y}
+          stroke="rgba(255,45,45,0.5)"
+          strokeWidth={1}
+        />
         {curve === "ring"
           ? menu.map((factor, index) => {
               const at = place(caret, menuRadius(radius), slotValue(index, menu.length));
@@ -158,8 +176,8 @@ export function Origin() {
               d={arcPath(caret.x, caret.y, radius, -1, 1)}
               fill="none"
               stroke="transparent"
-              strokeWidth={28}
-              className="pointer-events-auto cursor-grab"
+              strokeWidth={compact ? 40 : 28}
+              className="pointer-events-auto cursor-grab touch-none"
               onPointerDown={(event) => {
                 event.currentTarget.setPointerCapture(event.pointerId);
                 dragging.current = true;
@@ -213,8 +231,8 @@ export function Origin() {
               <button
                 key={factor.id}
                 type="button"
-                className={`pointer-events-auto absolute -translate-x-1/2 -translate-y-1/2 text-[11px] whitespace-nowrap ${steered ? "text-white" : "text-white/70"}`}
-                style={{ left: at.x, top: at.y + 14 }}
+                className={`pointer-events-auto absolute flex min-h-11 min-w-11 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full text-[11px] whitespace-nowrap ${steered ? "text-white" : "text-white/70"}`}
+                style={{ left: at.x, top: at.y + (compact ? 18 : 14) }}
                 onClick={() => openCurve(factor.id)}
               >
                 {factor.name}

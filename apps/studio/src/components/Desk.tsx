@@ -28,7 +28,9 @@ export function Desk() {
   const page = useDesk((state) => state.page);
   const curve = useDesk((state) => state.curve);
   const closeOrigin = useDesk((state) => state.closeOrigin);
+  const writeTake = useDesk((state) => state.writeTake);
   const [heights, setHeights] = useState<number[]>([]);
+  const [promptOpen, setPromptOpen] = useState(false);
 
   useEffect(() => {
     const saved = readSession();
@@ -61,7 +63,8 @@ export function Desk() {
       if (event.key === "PageDown") setPage(page + 1);
       if (event.key === "PageUp") setPage(page - 1);
       if (event.key === "Escape") {
-        if (curve !== "closed") closeOrigin();
+        if (promptOpen) setPromptOpen(false);
+        else if (curve !== "closed") closeOrigin();
         else {
           setDrawerOpen(false);
           selectBox(null);
@@ -73,7 +76,7 @@ export function Desk() {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [closeOrigin, curve, page, removeBox, selectBox, selectedBoxId, setDrawerOpen, setPage, step, undo]);
+  }, [closeOrigin, curve, page, promptOpen, removeBox, selectBox, selectedBoxId, setDrawerOpen, setPage, step, undo]);
 
   return (
     <main
@@ -87,17 +90,36 @@ export function Desk() {
         void readDropped(event.dataTransfer.files, addDoc);
       }}
     >
-      <div data-scroller className="absolute inset-x-0 top-0 bottom-7 overflow-x-hidden overflow-y-auto">
+      <div
+        data-scroller
+        className="desk-scroller absolute inset-x-0 top-0 overflow-x-hidden overflow-y-auto"
+      >
         <div className="w-full">
-          <div className="flex items-center justify-between gap-3 px-3 pt-3 md:hidden">
+          <div className="sticky top-0 z-30 flex items-center gap-2 border-b border-white/10 bg-black/90 px-3 py-2 backdrop-blur-sm md:hidden">
             <Factors layout="row" />
-            <button
-              type="button"
-              className="shrink-0 text-[11px] tracking-wide text-white/45"
-              onClick={() => setDrawerOpen(!drawerOpen)}
-            >
-              contexto · {docs.length}
-            </button>
+            <div className="ml-auto flex shrink-0 items-center gap-2">
+              <button
+                type="button"
+                className="rounded-full border border-white/15 px-2.5 py-1.5 text-[11px] text-white/75"
+                onClick={() => setPromptOpen(true)}
+              >
+                prompt
+              </button>
+              <button
+                type="button"
+                className="rounded-full border border-white/15 px-2.5 py-1.5 text-[11px] text-white/75"
+                onClick={() => writeTake()}
+              >
+                escribir
+              </button>
+              <button
+                type="button"
+                className="rounded-full border border-white/15 px-2.5 py-1.5 text-[11px] text-white/45"
+                onClick={() => setDrawerOpen(!drawerOpen)}
+              >
+                ctx {docs.length}
+              </button>
+            </div>
           </div>
           <div className="grid items-start grid-cols-[auto_minmax(0,1fr)] md:grid-cols-[auto_minmax(0,1fr)_300px]">
             <Reel heights={heights} />
@@ -124,6 +146,29 @@ export function Desk() {
       <ContextVectors />
       <Origin />
       <Timeline />
+      {promptOpen ? (
+        <>
+          <button
+            type="button"
+            aria-label="Cerrar prompt"
+            className="fixed inset-0 z-40 bg-black/70 md:hidden"
+            onClick={() => setPromptOpen(false)}
+          />
+          <aside className="fixed inset-x-0 top-0 bottom-0 z-50 flex flex-col bg-black pt-[env(safe-area-inset-top,0px)] md:hidden">
+            <header className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+              <h2 className="text-sm text-white">Prompt</h2>
+              <button
+                type="button"
+                className="rounded-md px-2 py-1 text-sm text-white/70"
+                onClick={() => setPromptOpen(false)}
+              >
+                Cerrar
+              </button>
+            </header>
+            <PromptPanel />
+          </aside>
+        </>
+      ) : null}
       <ContextDrawer />
     </main>
   );

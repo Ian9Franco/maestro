@@ -302,7 +302,7 @@ export function Manuscript({ onHeight }: { onHeight: (index: number, height: num
   return (
     <div
       ref={contentRef}
-      className={`relative min-w-0 ${curve === "closed" ? "pb-36" : "pb-[420px]"}`}
+      className={`relative min-w-0 ${curve === "closed" ? "pb-28 sm:pb-36" : "pb-[min(52vh,420px)] sm:pb-[420px]"}`}
       title="Arrastrá de una palabra a otra para fijar una frase. Un clic en el punto abre las curvas. Arrastrarlo: arriba recorta, abajo escribe."
     >
       <div className="h-8" />
@@ -359,7 +359,7 @@ export function Manuscript({ onHeight }: { onHeight: (index: number, height: num
         <button
           type="button"
           aria-label="Punto de escritura. Un clic abre las curvas. Arriba recorta, abajo genera."
-          className="absolute z-30 h-4 w-4 -translate-x-1/2 -translate-y-1/2 cursor-ns-resize rounded-full border border-[#ff4b2a] bg-white shadow-[0_0_10px_rgba(255,70,40,0.85)]"
+          className="absolute z-30 h-11 w-11 -translate-x-1/2 -translate-y-1/2 cursor-ns-resize rounded-full border-2 border-[#ff4b2a] bg-white shadow-[0_0_10px_rgba(255,70,40,0.85)] touch-none sm:h-4 sm:w-4 sm:border"
           style={{ left: caret.x, top: caret.y }}
           onPointerDown={beginPlay}
         />

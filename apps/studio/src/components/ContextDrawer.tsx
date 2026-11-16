@@ -25,7 +25,14 @@ export function ContextDrawer() {
   if (!open) return null;
 
   return (
-    <aside className="absolute top-0 right-0 bottom-7 z-40 flex w-[300px] max-w-full flex-col border-l border-white/10 bg-black/95 shadow-2xl">
+    <>
+      <button
+        type="button"
+        aria-label="Cerrar contexto"
+        className="fixed inset-0 z-40 bg-black/70 md:hidden"
+        onClick={() => setDrawerOpen(false)}
+      />
+      <aside className="fixed inset-x-0 top-0 bottom-0 z-50 flex w-full flex-col bg-black/98 pt-[env(safe-area-inset-top,0px)] shadow-2xl md:absolute md:inset-auto md:top-0 md:right-0 md:bottom-7 md:w-[min(100%,380px)] md:border-l md:border-white/10 md:pt-0">
       <header className="flex items-start justify-between gap-3 border-b border-white/10 px-4 py-3">
         <div>
           <h2 className="text-sm text-white">Contexto</h2>
@@ -138,6 +145,7 @@ export function ContextDrawer() {
         ))}
       </div>
     </aside>
+    </>
   );
 }
 

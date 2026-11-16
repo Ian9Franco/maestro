@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useDesk } from "@/lib/store";
+import { useCompactViewport } from "@/lib/viewport";
 
 type Point = { x: number; y: number };
 type Segment = { key: string; d: string; stroke: string; dash?: string };
@@ -16,6 +17,7 @@ export function ContextVectors() {
   const freshIndex = useDesk((state) => state.freshIndex);
   const selectedBoxId = useDesk((state) => state.selectedBoxId);
   const [segments, setSegments] = useState<Segment[]>([]);
+  const compact = useCompactViewport();
 
   useEffect(() => {
     function measure() {
@@ -40,15 +42,17 @@ export function ContextVectors() {
             stroke: "#ff5530",
           });
         }
-        for (const dot of document.querySelectorAll<HTMLElement>("[data-reading-dot]")) {
-          const at = pointOf(dot);
-          if (!at || dot.getBoundingClientRect().width <= 0) continue;
-          next.push({
-            key: `read-${dot.dataset.readingDot}`,
-            d: line(caret, at),
-            stroke: dot.dataset.contradict === "1" ? "#9eb7ff" : "#ff5530",
-            dash: "3 4",
-          });
+        if (!compact) {
+          for (const dot of document.querySelectorAll<HTMLElement>("[data-reading-dot]")) {
+            const at = pointOf(dot);
+            if (!at || dot.getBoundingClientRect().width <= 0) continue;
+            next.push({
+              key: `read-${dot.dataset.readingDot}`,
+              d: line(caret, at),
+              stroke: dot.dataset.contradict === "1" ? "#9eb7ff" : "#ff5530",
+              dash: "3 4",
+            });
+          }
         }
       }
       setSegments((current) => (sameSegments(current, next) ? current : next));
@@ -63,7 +67,7 @@ export function ContextVectors() {
       window.removeEventListener("resize", measure);
       window.cancelAnimationFrame(frame);
     };
-  }, [boxes, cursor, curve, factors, freshIndex, page, selectedBoxId, steers]);
+  }, [boxes, compact, cursor, curve, factors, freshIndex, page, selectedBoxId, steers]);
 
   return (
     <svg className="pointer-events-none fixed inset-0 z-20 h-screen w-screen" aria-hidden>

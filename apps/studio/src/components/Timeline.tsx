@@ -37,17 +37,27 @@ export function Timeline() {
   const wordCount = shown.reduce((sum, line) => sum + wordsOf(line).length, 0);
   const tokens = Math.round(shown.join(" ").length / 4);
 
+  const pinCount = boxes.filter((box) => box.lineIndex < cursor).length;
+  const boxCount = passageBoxes(
+    lines,
+    cursor,
+    boxes,
+    factors.find((factor) => factor.id === activeFactor)?.value ?? 0,
+  ).length;
+
   return (
-    <div className="absolute inset-x-0 bottom-0 z-30 flex h-7 items-center bg-black">
-      <div className="mono flex shrink-0 items-center gap-3 px-3 text-[10px] tracking-wide text-white/40 sm:gap-4 sm:px-4">
+    <div className="desk-timeline absolute inset-x-0 bottom-0 z-30 flex flex-col bg-black sm:h-7 sm:flex-row sm:items-center">
+      <div className="mono flex shrink-0 items-center gap-2 overflow-x-auto px-3 py-1.5 text-[10px] tracking-wide whitespace-nowrap text-white/40 sm:gap-4 sm:px-4 sm:py-0">
         <span>{wordCount}w</span>
         <span className="hidden sm:inline">{tokens} tok</span>
-        <span>paso {cursor}</span>
-        <span>
-          cajas {passageBoxes(lines, cursor, boxes, factors.find((factor) => factor.id === activeFactor)?.value ?? 0).length}
+        <span className="sm:hidden">
+          pin {pinCount} · rumbo {steers.length}
         </span>
-        <span>rumbo {steers.length}</span>
-        <span>pin {boxes.filter((box) => box.lineIndex < cursor).length}</span>
+        <span className="hidden sm:inline">paso {cursor}</span>
+        <span className="hidden md:inline">cajas {boxCount}</span>
+        <span className="hidden sm:inline">rumbo {steers.length}</span>
+        <span className="hidden sm:inline">pin {pinCount}</span>
+        <span className="inline sm:hidden">paso {cursor}</span>
         <span className="inline-flex items-center gap-1">
           <button type="button" className="px-1 text-white/70 disabled:text-white/20" disabled={page <= 0} onClick={() => setPage(page - 1)}>
             ‹
@@ -74,7 +84,7 @@ export function Timeline() {
         aria-valuenow={cursor}
         aria-label="Playhead"
         tabIndex={0}
-        className="relative h-full min-w-0 flex-1 cursor-ew-resize touch-none"
+        className="relative h-9 min-h-9 min-w-0 flex-1 cursor-ew-resize touch-none sm:h-full sm:min-h-0"
         onPointerDown={(event) => {
           beginGesture();
           event.currentTarget.setPointerCapture(event.pointerId);

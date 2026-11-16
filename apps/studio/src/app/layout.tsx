@@ -10,10 +10,16 @@ export const metadata: Metadata = {
   description: "Mesa para dirigir una historia, línea por línea.",
 };
 
+export const viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover" as const,
+};
+
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="es" className={`${inter.variable} ${mono.variable}`}>
-      <body>{children}</body>
+      <body className="touch-manipulation">{children}</body>
     </html>
   );
 }
