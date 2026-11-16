@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useDesk } from "@/lib/store";
+import { PAGE_SIZE, useDesk } from "@/lib/store";
 import {
   type AttentionBox,
   barColor,
@@ -14,7 +14,7 @@ import {
 } from "@/lib/text";
 
 const REEL_HINT =
-  "Muestra qué partes de tu historia influyen más en la próxima generación. Arrastra las palabras marcadas para cambiar el foco.";
+  "Muestra qué partes pesan en la próxima oración. Arrastrá una frase para meterla en el prompt.";
 
 type SourceBar = {
   key: string;
@@ -33,6 +33,7 @@ export function Reel({ heights }: { heights: number[] }) {
   const factors = useDesk((state) => state.factors);
   const activeFactor = useDesk((state) => state.activeFactor);
   const freshIndex = useDesk((state) => state.freshIndex);
+  const page = useDesk((state) => state.page);
   const factorValue = factors.find((factor) => factor.id === activeFactor)?.value ?? 0;
 
   const debounced = useDebounced(
@@ -109,7 +110,8 @@ export function Reel({ heights }: { heights: number[] }) {
         </span>
       </div>
       {energies.map((energy, index) => {
-        const cached = index >= cursor;
+        if (index < page * PAGE_SIZE || index >= page * PAGE_SIZE + PAGE_SIZE || index >= cursor) return null;
+        const cached = false;
         const line = lines[index] ?? "";
         const shown = Number(energy.toFixed(2));
         return (

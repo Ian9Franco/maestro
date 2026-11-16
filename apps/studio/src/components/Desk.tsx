@@ -3,10 +3,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { Arc } from "@/components/Arc";
 import { ContextDrawer } from "@/components/ContextDrawer";
+import { ContextVectors } from "@/components/ContextVectors";
 import { Factors } from "@/components/Factors";
 import { Manuscript } from "@/components/Manuscript";
+import { PromptPanel } from "@/components/PromptPanel";
 import { Reel } from "@/components/Reel";
 import { Timeline } from "@/components/Timeline";
+import { type DeskSnapshot, readSession, writeSession } from "@/lib/library";
 import { useDesk } from "@/lib/store";
 import { type DocKind } from "@/lib/text";
 
@@ -19,7 +22,19 @@ export function Desk() {
   const removeBox = useDesk((state) => state.removeBox);
   const selectedBoxId = useDesk((state) => state.selectedBoxId);
   const selectBox = useDesk((state) => state.selectBox);
+  const applySnapshot = useDesk((state) => state.applySnapshot);
+  const undo = useDesk((state) => state.undo);
+  const setPage = useDesk((state) => state.setPage);
+  const page = useDesk((state) => state.page);
   const [heights, setHeights] = useState<number[]>([]);
+
+  useEffect(() => {
+    const saved = readSession();
+    if (saved) applySnapshot(saved);
+    return useDesk.subscribe((state) => {
+      writeSession(snapshotFrom(state));
+    });
+  }, [applySnapshot]);
 
   const onHeight = useCallback((index: number, height: number) => {
     setHeights((current) => {
@@ -34,8 +49,15 @@ export function Desk() {
     function onKey(event: KeyboardEvent) {
       const target = event.target as HTMLElement | null;
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z" && !event.shiftKey) {
+        event.preventDefault();
+        undo();
+        return;
+      }
       if (event.key === "ArrowRight") step(1);
       if (event.key === "ArrowLeft") step(-1);
+      if (event.key === "PageDown") setPage(page + 1);
+      if (event.key === "PageUp") setPage(page - 1);
       if (event.key === "Escape") {
         setDrawerOpen(false);
         selectBox(null);
@@ -46,7 +68,7 @@ export function Desk() {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [removeBox, selectBox, selectedBoxId, setDrawerOpen, step]);
+  }, [page, removeBox, selectBox, selectedBoxId, setDrawerOpen, setPage, step, undo]);
 
   return (
     <main
@@ -72,12 +94,14 @@ export function Desk() {
               contexto · {docs.length}
             </button>
           </div>
-          <div className="flex items-start pl-1">
+          <div className="grid items-start grid-cols-[auto_minmax(0,1fr)] md:grid-cols-[auto_minmax(0,1fr)_300px]">
             <Reel heights={heights} />
-            <div className="min-w-0 w-full max-w-[760px]">
-              <Manuscript onHeight={onHeight} />
+            <div className="min-w-0">
+              <div className="desk-copy">
+                <Manuscript onHeight={onHeight} />
+              </div>
             </div>
-            <aside className="sticky top-0 hidden h-[calc(100vh-1.75rem)] min-w-[190px] flex-1 flex-col md:flex">
+            <aside className="sticky top-0 hidden h-[calc(100vh-1.75rem)] w-[300px] flex-col md:flex">
               <div className="absolute top-0 bottom-0 left-0 w-px bg-[#ff2d2d]/85 shadow-[0_0_10px_rgba(255,40,30,0.55)]" />
               <button
                 type="button"
@@ -87,11 +111,13 @@ export function Desk() {
                 contexto · {docs.length}
               </button>
               <Factors />
+              <PromptPanel />
             </aside>
           </div>
         </div>
       </div>
 
+      <ContextVectors />
       <div className="pointer-events-none absolute inset-x-0 bottom-7 z-20 flex justify-center">
         <Arc />
       </div>
@@ -99,6 +125,25 @@ export function Desk() {
       <ContextDrawer />
     </main>
   );
+}
+
+function snapshotFrom(state: ReturnType<typeof useDesk.getState>): DeskSnapshot {
+  return {
+    version: 1,
+    name: "sesión",
+    savedAt: new Date().toISOString(),
+    lines: state.lines.map((text, index) => ({
+      text,
+      origin: state.origins[index] ?? "muestra",
+      prompt: state.prompts[index] ?? null,
+    })),
+    boxes: state.boxes,
+    factors: state.factors,
+    docs: state.docs,
+    cursor: state.cursor,
+    variant: state.variant,
+    blocked: Object.keys(state.blocked).map(Number),
+  };
 }
 
 async function readDropped(

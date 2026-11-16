@@ -1,31 +1,35 @@
 "use client";
 
 import { useRef } from "react";
-import { useDesk } from "@/lib/store";
+import { PAGE_SIZE, useDesk } from "@/lib/store";
 import { wordsOf } from "@/lib/text";
 
 export function Timeline() {
   const lines = useDesk((state) => state.lines);
   const cursor = useDesk((state) => state.cursor);
-  const revealed = useDesk((state) => state.revealed);
   const freshIndex = useDesk((state) => state.freshIndex);
-  const setCursor = useDesk((state) => state.setCursor);
+  const page = useDesk((state) => state.page);
+  const history = useDesk((state) => state.history.length);
+  const cutTo = useDesk((state) => state.cutTo);
+  const beginGesture = useDesk((state) => state.beginGesture);
+  const endGesture = useDesk((state) => state.endGesture);
+  const undo = useDesk((state) => state.undo);
+  const setPage = useDesk((state) => state.setPage);
   const trackRef = useRef<HTMLDivElement>(null);
-  const gestureCeiling = useRef<number | null>(null);
 
   function seek(clientX: number) {
     const track = trackRef.current;
     if (!track || lines.length === 0) return;
     const rect = track.getBoundingClientRect();
     const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
-    const target = Math.round(ratio * lines.length);
-    const ceiling = gestureCeiling.current;
-    setCursor(ceiling === null ? target : Math.min(target, ceiling));
+    cutTo(Math.round(ratio * lines.length));
   }
+
+  const pages = Math.max(1, Math.ceil(Math.max(cursor, 1) / PAGE_SIZE));
 
   const max = Math.max(lines.length, 1);
   const left = `${(cursor / max) * 100}%`;
-  const shown = lines.slice(0, cursor);
+  const shown = lines;
   const wordCount = shown.reduce((sum, line) => sum + wordsOf(line).length, 0);
   const tokens = Math.round(shown.join(" ").length / 4);
 
@@ -35,6 +39,23 @@ export function Timeline() {
         <span>{wordCount}w</span>
         <span className="hidden sm:inline">{tokens} tok</span>
         <span>paso {cursor}</span>
+        <span className="inline-flex items-center gap-1">
+          <button type="button" className="px-1 text-white/70 disabled:text-white/20" disabled={page <= 0} onClick={() => setPage(page - 1)}>
+            ‹
+          </button>
+          pág {page + 1}/{pages}
+          <button
+            type="button"
+            className="px-1 text-white/70 disabled:text-white/20"
+            disabled={page >= pages - 1}
+            onClick={() => setPage(page + 1)}
+          >
+            ›
+          </button>
+        </span>
+        <button type="button" className="text-white/70 disabled:text-white/20" disabled={history === 0} onClick={undo}>
+          deshacer
+        </button>
       </div>
       <div
         ref={trackRef}
@@ -46,12 +67,12 @@ export function Timeline() {
         tabIndex={0}
         className="relative h-full min-w-0 flex-1 cursor-ew-resize touch-none"
         onPointerDown={(event) => {
-          gestureCeiling.current = revealed + 1;
+          beginGesture();
           event.currentTarget.setPointerCapture(event.pointerId);
           seek(event.clientX);
         }}
         onPointerUp={() => {
-          gestureCeiling.current = null;
+          endGesture();
         }}
         onPointerMove={(event) => {
           if (event.currentTarget.hasPointerCapture(event.pointerId)) seek(event.clientX);
@@ -64,7 +85,7 @@ export function Timeline() {
             className="absolute top-1/2 h-1.5 w-px -translate-y-1/2"
             style={{
               left: `calc(${((index + 0.5) / max) * 100}% - 8px)`,
-              background: index < revealed ? "rgba(255,255,255,0.4)" : "rgba(255,255,255,0.14)",
+              background: "rgba(255,255,255,0.4)",
             }}
           />
         ))}
