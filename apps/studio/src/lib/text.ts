@@ -13,7 +13,8 @@ export type Factor = {
 export type AttentionBox = {
   id: string;
   lineIndex: number;
-  wordIndex: number;
+  wordStart: number;
+  wordEnd: number;
   weight: number;
 };
 
@@ -77,6 +78,19 @@ export const SAMPLE_DOCS: SourceDoc[] = SAMPLE_DOC_SEEDS.map((doc) => ({
 
 export function wordsOf(line: string): string[] {
   return line.split(/\s+/).filter(Boolean);
+}
+
+export function phraseOf(line: string, box: Pick<AttentionBox, "wordStart" | "wordEnd">): string {
+  const words = wordsOf(line);
+  const start = Math.max(0, Math.min(box.wordStart, box.wordEnd));
+  const end = Math.min(words.length - 1, Math.max(box.wordStart, box.wordEnd));
+  return words.slice(start, end + 1).join(" ");
+}
+
+export function coversWord(box: Pick<AttentionBox, "wordStart" | "wordEnd">, wordIndex: number): boolean {
+  const start = Math.min(box.wordStart, box.wordEnd);
+  const end = Math.max(box.wordStart, box.wordEnd);
+  return wordIndex >= start && wordIndex <= end;
 }
 
 export function splitSpans(text: string): string[] {

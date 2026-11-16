@@ -19,7 +19,7 @@ export function Factors({ layout = "rail" }: { layout?: "rail" | "row" }) {
       className={
         layout === "row"
           ? "flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2"
-          : "flex flex-col items-start gap-8 px-4 pt-16"
+          : "flex flex-col items-start gap-3 px-4 pt-4"
       }
     >
       {factors.map((factor) => {

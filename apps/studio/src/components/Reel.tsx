@@ -14,7 +14,7 @@ import {
 } from "@/lib/text";
 
 const REEL_HINT =
-  "Muestra qué partes de tu historia influyen más en la próxima generación. Arrastra las palabras marcadas para cambiar el foco.";
+  "Muestra qué partes pesan en la próxima oración. Arrastrá una frase para meterla en el prompt.";
 
 type SourceBar = {
   key: string;

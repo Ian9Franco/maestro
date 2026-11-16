@@ -26,6 +26,18 @@ body {
   font-family: var(--font-mono), ui-monospace, monospace;
 }
 
+.desk-copy {
+  width: min(100%, 700px);
+  margin-inline: auto;
+}
+
+@media (min-width: 768px) {
+  .desk-copy {
+    margin-left: clamp(0px, calc(50vw - 350px - 112px), calc(100% - min(100%, 700px)));
+    margin-right: 0;
+  }
+}
+
 .bar-fill {
   transform-origin: bottom center;
   transform: scaleY(var(--s));
