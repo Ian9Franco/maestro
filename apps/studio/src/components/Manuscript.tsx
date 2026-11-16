@@ -210,8 +210,10 @@ export function Manuscript({ onHeight }: { onHeight: (index: number, height: num
             <div className="mb-0.5 text-[10px] leading-none text-sky-100/90">Atención: {box.weight.toFixed(1)}</div>
             <div
               className="relative rounded-sm border bg-sky-200/10"
-              style={{ height: Math.max(word.h, 22) }}
-              style={{ borderColor: selected ? "rgba(220,240,255,0.95)" : "rgba(170,210,255,0.65)" }}
+              style={{
+                height: Math.max(word.h, 22),
+                borderColor: selected ? "rgba(220,240,255,0.95)" : "rgba(170,210,255,0.65)",
+              }}
             >
               <button
                 type="button"
