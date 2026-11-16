@@ -4,12 +4,14 @@ import { useEffect, useState } from "react";
 import { useDesk } from "@/lib/store";
 
 type Point = { x: number; y: number };
-type Segment = { key: string; d: string };
+type Segment = { key: string; d: string; stroke: string; dash?: string };
 
 export function ContextVectors() {
   const cursor = useDesk((state) => state.cursor);
   const boxes = useDesk((state) => state.boxes);
   const factors = useDesk((state) => state.factors);
+  const steers = useDesk((state) => state.steers);
+  const curve = useDesk((state) => state.curve);
   const page = useDesk((state) => state.page);
   const freshIndex = useDesk((state) => state.freshIndex);
   const selectedBoxId = useDesk((state) => state.selectedBoxId);
@@ -18,20 +20,35 @@ export function ContextVectors() {
   useEffect(() => {
     function measure() {
       const caret = pointOf(document.querySelector("[data-caret]"));
-      const phrase = pointOf(document.querySelector("[data-phrase-end]"));
-      const dots = [...document.querySelectorAll<HTMLElement>("[data-factor-dot]")].flatMap((dot) => {
-        const at = pointOf(dot);
-        if (!at || dot.getBoundingClientRect().width <= 0) return [];
-        return [{ id: dot.dataset.factorDot ?? "factor", at }];
-      });
-      const origin = caret ?? phrase;
       const next: Segment[] = [];
-      if (phrase && caret && distance(phrase, caret) > 12) {
-        next.push({ key: "frase", d: curve(phrase, caret) });
-      }
-      if (origin) {
-        for (const dot of dots) {
-          next.push({ key: dot.id, d: curve(origin, dot.at) });
+      if (caret) {
+        for (const pin of document.querySelectorAll<HTMLElement>("[data-pin]")) {
+          const at = pointOf(pin);
+          if (!at) continue;
+          next.push({
+            key: `pin-${pin.dataset.pin}`,
+            d: line(caret, at),
+            stroke: "rgba(255,255,255,0.72)",
+          });
+        }
+        for (const dot of document.querySelectorAll<HTMLElement>("[data-factor-dot]")) {
+          const at = pointOf(dot);
+          if (!at || dot.getBoundingClientRect().width <= 0) continue;
+          next.push({
+            key: `steer-${dot.dataset.factorDot}`,
+            d: line(caret, at),
+            stroke: "#ff5530",
+          });
+        }
+        for (const dot of document.querySelectorAll<HTMLElement>("[data-reading-dot]")) {
+          const at = pointOf(dot);
+          if (!at || dot.getBoundingClientRect().width <= 0) continue;
+          next.push({
+            key: `read-${dot.dataset.readingDot}`,
+            d: line(caret, at),
+            stroke: dot.dataset.contradict === "1" ? "#9eb7ff" : "#ff5530",
+            dash: "3 4",
+          });
         }
       }
       setSegments((current) => (sameSegments(current, next) ? current : next));
@@ -46,12 +63,20 @@ export function ContextVectors() {
       window.removeEventListener("resize", measure);
       window.cancelAnimationFrame(frame);
     };
-  }, [boxes, cursor, factors, freshIndex, page, selectedBoxId]);
+  }, [boxes, cursor, curve, factors, freshIndex, page, selectedBoxId, steers]);
 
   return (
     <svg className="pointer-events-none fixed inset-0 z-20 h-screen w-screen" aria-hidden>
       {segments.map((segment) => (
-        <path key={segment.key} d={segment.d} fill="none" stroke="#ff5530" strokeWidth={1.15} strokeLinecap="round" />
+        <path
+          key={segment.key}
+          d={segment.d}
+          fill="none"
+          stroke={segment.stroke}
+          strokeWidth={1.05}
+          strokeLinecap="round"
+          strokeDasharray={segment.dash}
+        />
       ))}
     </svg>
   );
@@ -64,17 +89,17 @@ function pointOf(element: Element | null): Point | null {
   return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
 }
 
-function curve(from: Point, to: Point) {
-  const midX = from.x + (to.x - from.x) * 0.55;
-  const bow = Math.max(18, Math.min(72, Math.abs(to.y - from.y) * 0.2));
-  return `M ${from.x} ${from.y} C ${midX} ${from.y - bow * 0.15}, ${midX} ${to.y}, ${to.x} ${to.y}`;
-}
-
-function distance(a: Point, b: Point) {
-  return Math.hypot(a.x - b.x, a.y - b.y);
+function line(from: Point, to: Point) {
+  return `M ${from.x} ${from.y} L ${to.x} ${to.y}`;
 }
 
 function sameSegments(current: Segment[], next: Segment[]) {
   if (current.length !== next.length) return false;
-  return current.every((item, index) => item.key === next[index]?.key && item.d === next[index]?.d);
+  return current.every(
+    (item, index) =>
+      item.key === next[index]?.key &&
+      item.d === next[index]?.d &&
+      item.stroke === next[index]?.stroke &&
+      item.dash === next[index]?.dash,
+  );
 }

@@ -11,6 +11,7 @@ export function PromptPanel() {
   const boxes = useDesk((state) => state.boxes);
   const factors = useDesk((state) => state.factors);
   const activeFactor = useDesk((state) => state.activeFactor);
+  const steers = useDesk((state) => state.steers);
   const docs = useDesk((state) => state.docs);
   const variant = useDesk((state) => state.variant);
   const prompts = useDesk((state) => state.prompts);
@@ -21,8 +22,8 @@ export function PromptPanel() {
   const [name, setName] = useState("");
 
   const beat = useMemo(
-    () => composeBeat({ lines, cursor, boxes, factors, docs, activeFactor, variant }),
-    [activeFactor, boxes, cursor, docs, factors, lines, variant],
+    () => composeBeat({ lines, cursor, boxes, factors, docs, activeFactor, steers, variant }),
+    [activeFactor, boxes, cursor, docs, factors, lines, steers, variant],
   );
   const cachedNext = cursor < lines.length ? lines[cursor] : null;
   const lastPrompt = cursor > 0 ? prompts[cursor - 1] : undefined;

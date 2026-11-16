@@ -7,6 +7,7 @@ import {
   barColor,
   hashString,
   normalizeP95,
+  passageBoxes,
   rawLineScore,
   rawSpanScore,
   sparkProfile,
@@ -81,8 +82,27 @@ export function Reel({ heights }: { heights: number[] }) {
 
   const [tip, setTip] = useState<{ x: number; y: number; title: string; body: string } | null>(null);
 
+  const brackets = useMemo(() => {
+    const start = page * PAGE_SIZE;
+    const end = Math.min(cursor, start + PAGE_SIZE);
+    let top = 32;
+    const rows: { index: number; top: number; height: number }[] = [];
+    for (let index = start; index < end; index += 1) {
+      const height = heights[index] ?? 22;
+      rows.push({ index, top, height });
+      top += height;
+    }
+    return passageBoxes(lines, cursor, boxes, factorValue).flatMap((region) => {
+      const inside = rows.filter((row) => row.index >= region.from && row.index < region.to);
+      const first = inside[0];
+      const last = inside[inside.length - 1];
+      if (!first || !last) return [];
+      return [{ top: first.top, height: last.top + last.height - first.top, weight: region.weight }];
+    });
+  }, [boxes, cursor, factorValue, heights, lines, page]);
+
   return (
-    <div className="w-[56px] shrink-0 sm:w-[112px]" title={REEL_HINT} aria-label={REEL_HINT}>
+    <div className="relative w-[56px] shrink-0 sm:w-[112px]" title={REEL_HINT} aria-label={REEL_HINT}>
       <div className="flex h-8 items-end justify-end gap-px pr-2">
         <span className="hidden w-8 sm:block" />
         <span className="flex h-5 w-[34px] items-end justify-center gap-px">
@@ -142,6 +162,20 @@ export function Reel({ heights }: { heights: number[] }) {
           </div>
         );
       })}
+      {brackets.map((bracket) => (
+        <span key={`${bracket.top}-${bracket.weight}`}>
+          <span
+            className="pointer-events-none absolute border-y border-l border-white/35"
+            style={{ top: bracket.top, height: Math.max(8, bracket.height), width: 7, right: 46 }}
+          />
+          <span
+            className="mono pointer-events-none absolute left-0.5 hidden text-[10px] text-white/45 tabular-nums sm:inline"
+            style={{ top: bracket.top }}
+          >
+            {bracket.weight.toFixed(2)}
+          </span>
+        </span>
+      ))}
       {tip ? (
         <div
           className="pointer-events-none fixed z-50 max-w-xs rounded border border-white/10 bg-black/95 px-3 py-2 text-xs text-white/75"

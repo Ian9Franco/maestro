@@ -2,7 +2,7 @@
 
 import { useRef } from "react";
 import { PAGE_SIZE, useDesk } from "@/lib/store";
-import { wordsOf } from "@/lib/text";
+import { passageBoxes, wordsOf } from "@/lib/text";
 
 export function Timeline() {
   const lines = useDesk((state) => state.lines);
@@ -14,6 +14,10 @@ export function Timeline() {
   const beginGesture = useDesk((state) => state.beginGesture);
   const endGesture = useDesk((state) => state.endGesture);
   const undo = useDesk((state) => state.undo);
+  const boxes = useDesk((state) => state.boxes);
+  const steers = useDesk((state) => state.steers);
+  const factors = useDesk((state) => state.factors);
+  const activeFactor = useDesk((state) => state.activeFactor);
   const setPage = useDesk((state) => state.setPage);
   const trackRef = useRef<HTMLDivElement>(null);
 
@@ -39,6 +43,11 @@ export function Timeline() {
         <span>{wordCount}w</span>
         <span className="hidden sm:inline">{tokens} tok</span>
         <span>paso {cursor}</span>
+        <span>
+          cajas {passageBoxes(lines, cursor, boxes, factors.find((factor) => factor.id === activeFactor)?.value ?? 0).length}
+        </span>
+        <span>rumbo {steers.length}</span>
+        <span>pin {boxes.filter((box) => box.lineIndex < cursor).length}</span>
         <span className="inline-flex items-center gap-1">
           <button type="button" className="px-1 text-white/70 disabled:text-white/20" disabled={page <= 0} onClick={() => setPage(page - 1)}>
             ‹
