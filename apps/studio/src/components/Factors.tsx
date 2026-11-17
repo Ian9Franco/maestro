@@ -21,8 +21,8 @@ export function Factors({ layout = "rail" }: { layout?: "rail" | "row" }) {
   const lines = useDesk((state) => state.lines);
   const cursor = useDesk((state) => state.cursor);
   const boxes = useDesk((state) => state.boxes);
-  const openCurve = useDesk((state) => state.openCurve);
-  const curve = useDesk((state) => state.curve);
+  const activeFactor = useDesk((state) => state.activeFactor);
+  const setActiveFactor = useDesk((state) => state.setActiveFactor);
   const readings = diagnose(lines, cursor, boxes, factors, steers);
   const signature = `${cursor}:${boxes.map((box) => box.id).join(",")}`;
   const realized = useRealized(signature);
@@ -48,11 +48,11 @@ export function Factors({ layout = "rail" }: { layout?: "rail" | "row" }) {
           factor={factor}
           word={factorReadout(factor).word}
           pct={factorReadout(factor).pct}
-          active={curve === factor.id}
+          active={factor.id === activeFactor}
           filled={1}
           realized={false}
           contradicts={false}
-          onOpen={() => openCurve(factor.id)}
+          onOpen={() => setActiveFactor(factor.id)}
           link="solid"
         />
       ))}
@@ -65,11 +65,11 @@ export function Factors({ layout = "rail" }: { layout?: "rail" | "row" }) {
             factor={factor}
             word={reading.word}
             pct={reading.pct}
-            active={false}
+            active={reading.id === activeFactor}
             filled={realized * (reading.pct / 100)}
             realized={realized < 1}
             contradicts={reading.contradicts}
-            onOpen={() => openCurve(reading.id)}
+            onOpen={() => setActiveFactor(reading.id)}
             link="dashed"
           />
         );
@@ -122,7 +122,7 @@ function Chip({
       </span>
       <span>
         <span className="text-white/55">{factor.name}: </span>
-        <span style={{ color: contradicts ? "#9eb7ff" : wordColor(factor) }}>{word} </span>
+        <span style={{ color: contradicts ? "#9eb7ff" : wordColor(factor), transition: "color 200ms ease" }}>{word} </span>
         <span className="text-white/90">
           {pct}%{realized ? " realizado" : ""}
         </span>

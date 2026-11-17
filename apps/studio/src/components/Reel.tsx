@@ -137,6 +137,7 @@ export function Reel({ heights }: { heights: number[] }) {
         return (
           <div
             key={index}
+            data-reel-row={index}
             className={freshIndex === index ? "reel-shimmer relative" : "relative"}
             style={{ height: index < cursor ? (heights[index] ?? 22) : 22 }}
           >

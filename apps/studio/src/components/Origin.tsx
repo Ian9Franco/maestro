@@ -1,47 +1,46 @@
 "use client";
 
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useDesk } from "@/lib/store";
-import { admitFactors, clamp, factorReadout, wordsOf, type Factor } from "@/lib/text";
+import { planeAxes, vectorMix, vectorPaint, type Plane } from "@/lib/text";
 import { useCompactViewport } from "@/lib/viewport";
 
 type Point = { x: number; y: number };
+type Trail = { x: number; y: number; color: string };
+
+const ROSE: Plane[] = [
+  { x: 1, y: 0 },
+  { x: 1, y: 1 },
+  { x: 0, y: 1 },
+  { x: -1, y: 1 },
+  { x: -1, y: 0 },
+  { x: -1, y: -1 },
+  { x: 0, y: -1 },
+  { x: 1, y: -1 },
+];
 
 export function Origin() {
-  const curve = useDesk((state) => state.curve);
-  const factors = useDesk((state) => state.factors);
-  const steers = useDesk((state) => state.steers);
   const lines = useDesk((state) => state.lines);
   const cursor = useDesk((state) => state.cursor);
   const freshIndex = useDesk((state) => state.freshIndex);
-  const openCurve = useDesk((state) => state.openCurve);
-  const setFactorValue = useDesk((state) => state.setFactorValue);
+  const plane = useDesk((state) => state.plane);
+  const steering = useDesk((state) => state.steering);
+  const rewinding = useDesk((state) => state.rewinding);
+  const setPlane = useDesk((state) => state.setPlane);
+  const beginSteer = useDesk((state) => state.beginSteer);
+  const endSteer = useDesk((state) => state.endSteer);
   const [caret, setCaret] = useState<Point | null>(null);
-  const [size, setSize] = useState({ w: 0, h: 0 });
-  const [kick, setKick] = useState(0);
+  const [viewportH, setViewportH] = useState(0);
+  const [trail, setTrail] = useState<Trail[]>([]);
   const dragging = useRef(false);
-  const velocity = useRef(0);
-  const previous = useRef(0);
+  const trailToken = useRef(0);
   const compact = useCompactViewport();
-
-  useEffect(() => {
-    if (curve === "closed") return;
-    const scroller = document.querySelector("[data-scroller]");
-    const caretEl = document.querySelector("[data-caret]");
-    if (!scroller || !caretEl) return;
-    const top = caretEl.getBoundingClientRect().top;
-    if (Math.abs(top - 200) > 48) scroller.scrollBy({ top: top - 200 });
-  }, [curve]);
 
   useEffect(() => {
     function measure() {
       const next = pointOf(document.querySelector("[data-caret]"));
       setCaret((current) => (samePoint(current, next) ? current : next));
-      setSize((current) => {
-        const w = window.innerWidth;
-        const h = window.innerHeight;
-        return current.w === w && current.h === h ? current : { w, h };
-      });
+      setViewportH((current) => (current === window.innerHeight ? current : window.innerHeight));
     }
     measure();
     const scroller = document.querySelector("[data-scroller]");
@@ -53,271 +52,230 @@ export function Origin() {
       window.removeEventListener("resize", measure);
       window.cancelAnimationFrame(frame);
     };
-  }, [cursor, curve, freshIndex, lines]);
+  }, [cursor, freshIndex, lines]);
 
-  const expanded = curve !== "closed" && curve !== "ring" ? factors.find((factor) => factor.id === curve) : undefined;
-  const shown = expanded ? clamp(expanded.value + kick, -1, 1) : 0;
+  useEffect(() => {
+    if (!rewinding) return;
+    setTrail([]);
+  }, [rewinding]);
 
-  if (!caret || size.w === 0) return null;
+  useEffect(() => {
+    const scroller = document.querySelector("[data-scroller]");
+    const caretEl = document.querySelector("[data-caret]");
+    if (!scroller || !(caretEl instanceof HTMLElement)) return;
+    const scrollerRect = scroller.getBoundingClientRect();
+    const caretRect = caretEl.getBoundingClientRect();
+    const target = scrollerRect.top + scrollerRect.height * 0.3;
+    if (Math.abs(caretRect.top - target) < 48) return;
+    scroller.scrollBy({ top: caretRect.top - target });
+  }, [compact, cursor, lines]);
 
-  const room = size.h - caret.y - (compact ? 72 : 48);
-  const radius = compact
-    ? Math.max(64, Math.min(108, room - 12))
-    : Math.max(96, Math.min(148, room - 24));
-  const admitted = admitFactors(lines, cursor, factors);
-  const ring = [...admitted];
-  for (const id of steers) {
-    const factor = factors.find((item) => item.id === id);
-    if (factor && !ring.some((item) => item.id === factor.id)) ring.push(factor);
+  if (!caret) return null;
+
+  const reach = compact ? 48 : 68;
+  const drop = compact ? 248 : 176;
+  const timeline = compact ? 92 : 40;
+  const paint = vectorPaint(plane.x, plane.y);
+  const axes = planeAxes(lines, cursor);
+  const mix = vectorMix(plane.x, plane.y, axes);
+  const origin = {
+    x: caret.x,
+    y: Math.min(caret.y + drop, Math.max(caret.y + 36, (viewportH || caret.y + drop) - timeline - reach - 24)),
+  };
+  const node = {
+    x: origin.x + plane.x * reach,
+    y: origin.y - plane.y * reach,
+  };
+  const ringWidth = rewinding ? 1.2 : paint.width;
+  const ringR = (rewinding ? 0.62 : 1) * (8 + ringWidth / 2);
+  const ease = steering ? "none" : "left 200ms ease, top 200ms ease";
+
+  function planeFromPointer(clientX: number, clientY: number): Plane {
+    const dx = (clientX - origin.x) / reach;
+    const dy = (origin.y - clientY) / reach;
+    const mag = Math.hypot(dx, dy);
+    if (mag <= 1) return { x: dx, y: dy };
+    return { x: dx / mag, y: dy / mag };
   }
-  const menu = ring.slice(0, 6);
-  const words = lines.slice(0, cursor).reduce((sum, line) => sum + wordsOf(line).length, 0);
-  const readout = expanded ? factorReadout({ ...expanded, value: shown }) : null;
 
-  function valueFromEvent(event: ReactPointerEvent<SVGPathElement>) {
-    const angle = Math.atan2(event.clientY - caret!.y, event.clientX - caret!.x);
-    const bounded = clamp(angle, 0, Math.PI);
-    return (1 - bounded / Math.PI) * 2 - 1;
+  function release() {
+    if (!dragging.current) return;
+    dragging.current = false;
+    endSteer();
+    const token = trailToken.current;
+    window.setTimeout(() => {
+      if (trailToken.current === token) setTrail([]);
+    }, 220);
   }
 
   return (
     <div className="pointer-events-none fixed inset-0 z-[25]">
       <svg className="h-full w-full overflow-visible" aria-hidden>
+        <line x1={caret.x} y1={caret.y} x2={origin.x} y2={origin.y} stroke="rgba(255,255,255,0.28)" strokeWidth={1} />
+        <circle cx={caret.x} cy={caret.y} r={2.5} fill="#fff" />
+        <circle cx={origin.x} cy={origin.y} r={reach} fill="none" stroke="rgba(255,255,255,0.16)" strokeWidth={1} />
         <line
-          x1={caret.x}
-          y1={compact ? Math.max(0, caret.y - 120) : 0}
-          x2={caret.x}
-          y2={size.h - (compact ? 72 : 28)}
-          stroke="rgba(255,45,45,0.78)"
+          x1={origin.x - reach}
+          y1={origin.y}
+          x2={origin.x + reach}
+          y2={origin.y}
+          stroke="rgba(255,255,255,0.22)"
           strokeWidth={1}
         />
         <line
-          x1={compact ? Math.max(0, caret.x - 140) : 0}
-          y1={caret.y}
-          x2={compact ? Math.min(size.w, caret.x + 140) : size.w}
-          y2={caret.y}
-          stroke="rgba(255,45,45,0.5)"
+          x1={origin.x}
+          y1={origin.y - reach}
+          x2={origin.x}
+          y2={origin.y + reach}
+          stroke="rgba(255,255,255,0.22)"
           strokeWidth={1}
         />
-        {curve === "ring"
-          ? menu.map((factor, index) => {
-              const at = place(caret, menuRadius(radius), slotValue(index, menu.length));
-              const tick = place(caret, menuRadius(radius) - 8, slotValue(index, menu.length));
-              return (
-                <line
-                  key={factor.id}
-                  x1={tick.x}
-                  y1={tick.y}
-                  x2={at.x}
-                  y2={at.y}
-                  stroke="rgba(255,255,255,0.45)"
-                  strokeWidth={1}
-                />
-              );
-            })
-          : null}
-        {curve === "ring" ? (
-          <path
-            d={arcPath(caret.x, caret.y, menuRadius(radius), -1, 1)}
-            fill="none"
-            stroke="rgba(255,255,255,0.72)"
-            strokeWidth={1}
-            strokeDasharray="2 5"
+        {ROSE.map((dir) => {
+          const at = screenOf(origin, reach + 12, dir);
+          const angle = (Math.atan2(at.y - origin.y, at.x - origin.x) * 180) / Math.PI;
+          const opacity = rewinding ? 0.2 : roseOpacity(dir, plane);
+          return (
+            <g
+              key={`${dir.x}-${dir.y}`}
+              transform={`translate(${at.x} ${at.y}) rotate(${angle})`}
+              opacity={opacity}
+              style={{ transition: "opacity 200ms ease" }}
+            >
+              <path d="M -6 -3.2 L 5 0 L -6 3.2" fill="none" stroke="white" strokeWidth={1.25} strokeLinejoin="round" />
+            </g>
+          );
+        })}
+        {trail.map((point, index) => (
+          <circle
+            key={`${point.x}-${point.y}-${index}`}
+            cx={point.x}
+            cy={point.y}
+            r={3.5}
+            fill={point.color}
+            opacity={((index + 1) / trail.length) * 0.55}
           />
-        ) : null}
-        {expanded ? (
-          <>
-            <path
-              d={arcPath(caret.x, caret.y, radius * 0.62, -1, 1)}
-              fill="none"
-              stroke="rgba(255,255,255,0.12)"
-              strokeWidth={1}
-            />
-            <path
-              d={arcPath(caret.x, caret.y, radius * 0.84, -1, 1)}
-              fill="none"
-              stroke="rgba(255,255,255,0.16)"
-              strokeWidth={1}
-            />
-            {[-0.5, 0, 0.5].map((mark) => {
-              const inner = place(caret, radius * 0.72, mark);
-              const outer = place(caret, radius * 0.9, mark);
-              return (
-                <line
-                  key={mark}
-                  x1={inner.x}
-                  y1={inner.y}
-                  x2={outer.x}
-                  y2={outer.y}
-                  stroke="rgba(255,255,255,0.35)"
-                  strokeWidth={1}
-                />
-              );
-            })}
-            {Math.abs((shown < 0 ? shown + 1 : 1 - shown)) > 0.02 ? (
-              <path
-                d={arcPath(caret.x, caret.y, radius, shown < 0 ? -1 : shown, shown < 0 ? shown : 1)}
-                fill="none"
-                stroke="#ff4b2a"
-                strokeWidth={2.4}
-                strokeLinecap="round"
-              />
-            ) : null}
-            {Math.abs(shown < 0 ? 1 - shown : shown + 1) > 0.02 ? (
-              <path
-                d={arcPath(caret.x, caret.y, radius, shown < 0 ? shown : -1, shown < 0 ? 1 : shown)}
-                fill="none"
-                stroke="rgba(255,255,255,0.78)"
-                strokeWidth={1.4}
-                strokeLinecap="round"
-              />
-            ) : null}
-            <path
-              d={arcPath(caret.x, caret.y, radius, -1, 1)}
-              fill="none"
-              stroke="transparent"
-              strokeWidth={compact ? 40 : 28}
-              className="pointer-events-auto cursor-grab touch-none"
-              onPointerDown={(event) => {
-                event.currentTarget.setPointerCapture(event.pointerId);
-                dragging.current = true;
-                setKick(0);
-                const next = valueFromEvent(event);
-                velocity.current = 0;
-                previous.current = next;
-                setFactorValue(expanded.id, next);
-              }}
-              onPointerMove={(event) => {
-                if (!dragging.current) return;
-                const next = valueFromEvent(event);
-                velocity.current = next - previous.current;
-                previous.current = next;
-                setFactorValue(expanded.id, next);
-              }}
-              onPointerUp={() => {
-                dragging.current = false;
-                const impulse = clamp(velocity.current * 8, -0.08, 0.08);
-                if (Math.abs(impulse) < 0.01) return;
-                setKick(impulse);
-                window.setTimeout(() => setKick(0), 160);
-              }}
-            />
-            <line
-              x1={caret.x}
-              y1={caret.y}
-              x2={place(caret, radius, shown).x}
-              y2={place(caret, radius, shown).y}
-              stroke="rgba(255,255,255,0.85)"
-              strokeWidth={1}
-            />
-          </>
-        ) : null}
+        ))}
+        <circle
+          cx={node.x}
+          cy={node.y}
+          r={ringR}
+          fill="#000"
+          stroke={rewinding ? "#8d8d8d" : paint.ring}
+          strokeWidth={ringWidth}
+          className={rewinding ? "vector-shimmer" : undefined}
+          style={{
+            transition: steering
+              ? "stroke 200ms ease, stroke-width 200ms ease"
+              : "cx 200ms ease, cy 200ms ease, r 200ms ease, stroke 200ms ease, stroke-width 200ms ease",
+          }}
+        />
       </svg>
 
-      {curve !== "closed" ? (
+      <AxisLabel x={origin.x - reach - (compact ? 28 : 36)} y={origin.y} dim={rewinding}>
+        {axes.left}
+      </AxisLabel>
+      <AxisLabel x={origin.x + reach + (compact ? 28 : 36)} y={origin.y} dim={rewinding}>
+        {axes.right}
+      </AxisLabel>
+      <AxisLabel x={origin.x} y={origin.y - reach - (compact ? 16 : 20)} dim={rewinding}>
+        {axes.up}
+      </AxisLabel>
+      <AxisLabel x={origin.x} y={origin.y + reach + (compact ? 16 : 20)} dim={rewinding}>
+        {axes.down}
+      </AxisLabel>
+      <span
+        className="mono absolute -translate-x-1/2 text-[11px] whitespace-nowrap text-white/70"
+        style={{
+          left: origin.x,
+          top: origin.y + reach + (compact ? 30 : 36),
+          opacity: rewinding ? 0.35 : 1,
+          transition: "opacity 200ms ease",
+        }}
+      >
+        {mix}
+      </span>
+
+      <button
+        type="button"
+        data-vector={paint.color}
+        data-rewinding={rewinding ? "1" : "0"}
+        data-tension={paint.tension.toFixed(2)}
+        aria-label={
+          rewinding
+            ? "Rebobinando. El vector se apaga y se recalcula."
+            : `Vector. ${mix}. Arrastrá para mezclar tono, foco y tensión.`
+        }
+        className="pointer-events-auto absolute z-30 -translate-x-1/2 -translate-y-1/2 cursor-grab touch-none rounded-full active:cursor-grabbing"
+        style={{
+          left: node.x,
+          top: node.y,
+          width: compact ? 44 : 36,
+          height: compact ? 44 : 36,
+          transition: ease,
+        }}
+        onPointerDown={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          event.currentTarget.setPointerCapture(event.pointerId);
+          dragging.current = true;
+          trailToken.current += 1;
+          setTrail([]);
+          beginSteer();
+        }}
+        onPointerMove={(event) => {
+          if (!dragging.current) return;
+          const next = planeFromPointer(event.clientX, event.clientY);
+          setPlane(next.x, next.y);
+          const color = vectorPaint(next.x, next.y).color;
+          setTrail((current) => {
+            const last = current[current.length - 1];
+            if (last && Math.hypot(last.x - event.clientX, last.y - event.clientY) < 8) return current;
+            return [...current, { x: event.clientX, y: event.clientY, color }].slice(-8);
+          });
+        }}
+        onPointerUp={release}
+        onPointerCancel={release}
+      >
         <span
-          className="mono absolute rounded bg-black/80 px-1 text-[10px] text-white/70"
-          style={{ left: caret.x + 14, top: caret.y - 22 }}
-        >
-          {words} palabras
-        </span>
-      ) : null}
-
-      {curve === "ring"
-        ? menu.map((factor, index) => {
-            const at = place(caret, menuRadius(radius), slotValue(index, menu.length));
-            const steered = steers.includes(factor.id);
-            return (
-              <button
-                key={factor.id}
-                type="button"
-                className={`pointer-events-auto absolute flex min-h-11 min-w-11 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full text-[11px] whitespace-nowrap ${steered ? "text-white" : "text-white/70"}`}
-                style={{ left: at.x, top: at.y + (compact ? 18 : 14) }}
-                onClick={() => openCurve(factor.id)}
-              >
-                {factor.name}
-              </button>
-            );
-          })
-        : null}
-
-      {expanded && readout
-        ? marksOf(expanded).map((mark) => {
-            const at = place(caret, radius + 16, mark.at);
-            const chosen = mark.word === readout.word;
-            return (
-              <span
-                key={`${mark.word}-${mark.at}`}
-                className={`absolute -translate-x-1/2 -translate-y-1/2 text-[11px] whitespace-nowrap ${chosen ? "rounded-sm bg-[#ff3b1f] px-1.5 py-0.5 text-white" : "text-white/55"}`}
-                style={{ left: at.x, top: at.y }}
-              >
-                {mark.word}
-              </span>
-            );
-          })
-        : null}
-
-      {expanded && readout ? (
-        <span
-          className="absolute -translate-x-1/2 text-[12px] whitespace-nowrap text-white/80"
-          style={{ left: caret.x, top: caret.y + radius + 22 }}
-        >
-          {expanded.name}: <span style={{ color: poleColor(shown) }}>{readout.word}</span> {readout.pct}%
-        </span>
-      ) : null}
-
-      {curve !== "closed"
-        ? steers
-            .filter((id) => id !== expanded?.id)
-            .map((id, index, list) => {
-              const factor = factors.find((item) => item.id === id);
-              if (!factor) return null;
-              const read = factorReadout(factor);
-              const at = place(caret, 44, slotValue(index, list.length));
-              return (
-                <button
-                  key={id}
-                  type="button"
-                  className="pointer-events-auto absolute -translate-x-1/2 -translate-y-1/2 text-[10px] whitespace-nowrap text-white/80"
-                  style={{ left: at.x, top: at.y }}
-                  onClick={() => openCurve(id)}
-                >
-                  {factor.name}: {read.word}
-                </button>
-              );
-            })
-        : null}
+          className="absolute top-1/2 left-1/2 rounded-full"
+          style={{
+            width: 14,
+            height: 14,
+            marginLeft: -7,
+            marginTop: -7,
+            background: rewinding ? "#8a8a8a" : paint.color,
+            boxShadow: rewinding ? "none" : `0 0 12px ${paint.color}`,
+            transform: rewinding ? "scale(0.7)" : "scale(1)",
+            transition: "background-color 200ms ease, transform 200ms ease, box-shadow 200ms ease",
+          }}
+        />
+      </button>
     </div>
   );
 }
 
-function menuRadius(radius: number) {
-  return Math.min(128, radius * 0.86);
+function AxisLabel({ x, y, dim, children }: { x: number; y: number; dim: boolean; children: string }) {
+  return (
+    <span
+      className="mono absolute -translate-x-1/2 -translate-y-1/2 text-[10px] whitespace-nowrap text-white/50"
+      style={{ left: x, top: y, opacity: dim ? 0.25 : 1, transition: "opacity 200ms ease" }}
+    >
+      {children}
+    </span>
+  );
 }
 
-function slotValue(index: number, count: number) {
-  if (count <= 1) return 0;
-  return -0.58 + (1.16 * index) / (count - 1);
+function screenOf(origin: Point, radius: number, dir: Plane): Point {
+  const len = Math.hypot(dir.x, dir.y) || 1;
+  return { x: origin.x + (dir.x / len) * radius, y: origin.y - (dir.y / len) * radius };
 }
 
-function place(origin: Point, radius: number, value: number): Point {
-  const angle = Math.PI * (1 - (clamp(value, -1, 1) + 1) / 2);
-  return { x: origin.x + radius * Math.cos(angle), y: origin.y + radius * Math.sin(angle) };
-}
-
-function arcPath(cx: number, cy: number, radius: number, from: number, to: number) {
-  const start = place({ x: cx, y: cy }, radius, from);
-  const end = place({ x: cx, y: cy }, radius, to);
-  return `M ${start.x} ${start.y} A ${radius} ${radius} 0 0 0 ${end.x} ${end.y}`;
-}
-
-function marksOf(factor: Factor) {
-  return [{ at: -1, word: factor.neg }, ...(factor.stops ?? []), { at: 1, word: factor.pos }];
-}
-
-function poleColor(value: number) {
-  if (Math.abs(value) < 0.08) return "rgba(255,255,255,0.8)";
-  return value < 0 ? "#ffb089" : "#ff5a3c";
+function roseOpacity(dir: Plane, plane: Plane) {
+  const mag = Math.hypot(plane.x, plane.y);
+  if (mag < 0.12) return 0.35;
+  const len = Math.hypot(dir.x, dir.y) || 1;
+  const dot = (dir.x / len) * (plane.x / mag) + (dir.y / len) * (plane.y / mag);
+  return dot > 0.5 ? 1 : 0.2;
 }
 
 function pointOf(element: Element | null): Point | null {

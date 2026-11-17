@@ -27,7 +27,35 @@ export type AttentionBox = {
   wordStart: number;
   wordEnd: number;
   weight: number;
+  hue?: string;
 };
+
+export type Plane = { x: number; y: number };
+
+export type VectorPaint = {
+  color: string;
+  ring: string;
+  width: number;
+  tension: number;
+};
+
+export type PlaneAxes = {
+  left: string;
+  right: string;
+  up: string;
+  down: string;
+};
+
+export const PLANE_STEERS: FactorId[] = ["tono", "foco", "tension"];
+
+export const INITIAL_PLANE: Plane = { x: 0.48, y: -0.72 };
+
+export const SPECULATIVE_ANCHORS: Plane[] = [
+  { x: 0.78, y: -0.78 },
+  { x: -0.78, y: -0.78 },
+  { x: 0.78, y: 0.78 },
+  { x: -0.78, y: 0.78 },
+];
 
 export type SourceDoc = {
   id: string;
@@ -302,4 +330,158 @@ function hex(color: string): [number, number, number] {
     Number.parseInt(value.slice(2, 4), 16),
     Number.parseInt(value.slice(4, 6), 16),
   ];
+}
+
+function mixHex(from: string, to: string, amount: number): string {
+  const a = hex(from);
+  const b = hex(to);
+  const t = clamp(amount, 0, 1);
+  const channel = (index: number) =>
+    Math.round(a[index] + (b[index] - a[index]) * t)
+      .toString(16)
+      .padStart(2, "0");
+  return `#${channel(0)}${channel(1)}${channel(2)}`;
+}
+
+export function paintAlpha(color: string, alpha: number): string {
+  const [r, g, b] = hex(color);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+export function toneValue(x: number): number {
+  const mag = Math.abs(x);
+  if (mag < 0.08) return 0;
+  if (x > 0) return mag > 0.62 ? 1 : -0.55;
+  return mag > 0.62 ? -1 : 0.42;
+}
+
+export function focusValue(y: number): number {
+  if (Math.abs(y) < 0.08) return 0;
+  return y > 0 ? Math.max(0.4, y) : Math.min(-0.4, y);
+}
+
+export function tensionValue(x: number, y: number): number {
+  return clamp(Math.min(1, Math.hypot(x, y)) * 2 - 1, -1, 1);
+}
+
+export function withPlane(factors: Factor[], x: number, y: number): Factor[] {
+  const tone = toneValue(x);
+  const focus = focusValue(y);
+  const tension = tensionValue(x, y);
+  return factors.map((factor) => {
+    if (factor.id === "tono") return { ...factor, value: tone };
+    if (factor.id === "foco") return { ...factor, value: focus };
+    if (factor.id === "tension") return { ...factor, value: tension };
+    return factor;
+  });
+}
+
+export function planeOfFactors(factors: Factor[]): Plane {
+  const tono = factors.find((factor) => factor.id === "tono")?.value ?? 0;
+  const foco = factors.find((factor) => factor.id === "foco")?.value ?? 0;
+  return { x: clamp(-tono, -1, 1), y: clamp(foco, -1, 1) };
+}
+
+export function vectorPaint(x: number, y: number): VectorPaint {
+  const tension = Math.min(1, Math.hypot(x, y));
+  const tone =
+    x >= 0 ? mixHex("#f0b0c4", "#b48cff", clamp(x, 0, 1)) : mixHex("#8aa4c8", "#9aa097", clamp(-x, 0, 1));
+  const focus =
+    y >= 0 ? mixHex("#d5dbe6", "#9eb7ff", clamp(y, 0, 1)) : mixHex("#f0b0c4", "#ff8f6a", clamp(-y, 0, 1));
+  const weight = Math.abs(y) / (Math.abs(x) + Math.abs(y) || 1);
+  const color = mixHex(tone, focus, weight);
+  const ring = mixHex(color, "#ff3a2a", clamp((tension - 0.18) / 0.82, 0, 1));
+  return { color, ring, width: 1.5 + tension * 7, tension };
+}
+
+export function vectorMix(x: number, y: number, axes: PlaneAxes): string {
+  const tension = Math.min(1, Math.hypot(x, y));
+  const label = `tensión ${Math.round(tension * 100)}%`;
+  const ax = Math.abs(x);
+  const ay = Math.abs(y);
+  const sum = ax + ay;
+  if (tension < 0.08 || sum < 0.001) return label;
+  const xWord = x >= 0 ? axes.right : axes.left;
+  const yWord = y >= 0 ? axes.up : axes.down;
+  const px = Math.round((ax / sum) * 100);
+  const py = 100 - px;
+  if (py < 18) return `${label} · ${xWord}`;
+  if (px < 18) return `${label} · ${yWord}`;
+  return `${label} · ${px}% ${xWord} · ${py}% ${yWord}`;
+}
+
+export function planeAxes(lines: string[], cursor: number): PlaneAxes {
+  const text = passageWindow(lines, cursor);
+  const down = text.includes("mara") ? "Mara" : text.includes("niña") ? "niña" : "ella";
+  const fear = countCues(text, ["sombra", "noche", "puente", "perdió", "golpe", "nadie"]);
+  const wonder = countCues(text, ["destino", "boleto", "dobla", "agua", "todavía"]);
+  return {
+    left: fear >= wonder ? "sombrío" : "seco",
+    right: wonder > fear ? "asombroso" : "tierno",
+    up: "narrador",
+    down,
+  };
+}
+
+export function planeFromPassage(lines: string[], cursor: number): Plane {
+  const text = passageWindow(lines, cursor);
+  const tender = countCues(text, ["niña", "tibio", "calor", "suave", "boleto"]);
+  const somber = countCues(text, ["sombra", "noche", "perdió", "nadie", "puente"]);
+  const wondrous = countCues(text, ["destino", "boleto", "dobla", "agua", "todavía"]);
+  const dry = countCues(text, ["cuenta", "asientos", "hora", "reloj", "veinte"]);
+  const mara = countCues(text, ["mara"]);
+  const narr = countCues(text, ["dice", "nadie", "alguien"]);
+  let x = tender + wondrous * 0.8 - (somber + dry * 0.7);
+  let y = narr * 0.8 - mara;
+  if (Math.abs(x) < 0.35 && Math.abs(y) < 0.35) {
+    const hashed = hashString(text || String(cursor));
+    x += ((hashed % 100) / 100) * 0.5 - 0.25;
+    y += (((hashed >>> 8) % 100) / 100) * 0.5 - 0.25;
+  }
+  const len = Math.hypot(x, y) || 1;
+  const mag = Math.min(0.92, 0.38 + Math.min(1.4, Math.hypot(x, y)) * 0.28);
+  return { x: (x / len) * mag, y: (y / len) * mag };
+}
+
+export function nearestAnchor(plane: Plane, anchors: Plane[]): number {
+  let best = 0;
+  let score = Infinity;
+  anchors.forEach((anchor, index) => {
+    const distance = (anchor.x - plane.x) ** 2 + (anchor.y - plane.y) ** 2;
+    if (distance < score) {
+      score = distance;
+      best = index;
+    }
+  });
+  return best;
+}
+
+export function realizedSentences(
+  checks: Record<number, FactorHits>,
+  from: number,
+  to: number,
+): { index: number; factor: "tono" | "foco" | "tension" }[] {
+  const wanted = ["tono", "foco", "tension"] as const;
+  const used = new Set<number>();
+  const marks: { index: number; factor: "tono" | "foco" | "tension" }[] = [];
+  for (const factor of wanted) {
+    for (let index = to - 1; index >= from; index -= 1) {
+      if (used.has(index) || !checks[index]?.[factor]) continue;
+      used.add(index);
+      marks.push({ index, factor });
+      break;
+    }
+  }
+  return marks;
+}
+
+function passageWindow(lines: string[], cursor: number): string {
+  const end = Math.max(0, cursor);
+  const window = lines.slice(Math.max(0, end - 4), end);
+  const source = window.length > 0 ? window : lines.slice(0, 1);
+  return source.join(" ").toLowerCase();
+}
+
+function countCues(text: string, cues: string[]): number {
+  return cues.reduce((sum, cue) => sum + Math.max(0, text.split(cue).length - 1), 0);
 }

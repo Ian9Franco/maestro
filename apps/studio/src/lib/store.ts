@@ -7,15 +7,23 @@ import {
   type AttentionBox,
   type DocKind,
   FACTORS,
+  INITIAL_PLANE,
+  PLANE_STEERS,
+  SPECULATIVE_ANCHORS,
   type Factor,
   type CurveView,
   type FactorHits,
   type FactorId,
+  type Plane,
   type SourceDoc,
   SAMPLE_DOCS,
   SAMPLE_LINES,
   factorHit,
+  planeFromPassage,
+  planeOfFactors,
   splitSpans,
+  vectorPaint,
+  withPlane,
   wordsOf,
 } from "@/lib/text";
 
@@ -37,6 +45,8 @@ type HistorySnap = {
   page: number;
   curve: CurveView;
   steers: FactorId[];
+  factors: Factor[];
+  plane: Plane;
 };
 
 type DeskState = {
@@ -57,10 +67,20 @@ type DeskState = {
   activeFactor: FactorId;
   curve: CurveView;
   steers: FactorId[];
+  plane: Plane;
+  steering: boolean;
+  steerMoved: boolean;
+  rewinding: boolean;
+  previews: string[];
+  anchors: Plane[];
   docs: SourceDoc[];
   drawerOpen: boolean;
   checks: Record<number, FactorHits>;
   setCursor: (next: number) => void;
+  seekCursor: (target: number) => void;
+  setPlane: (x: number, y: number) => void;
+  beginSteer: () => void;
+  endSteer: () => void;
   step: (direction: -1 | 1) => void;
   settleFresh: () => void;
   writeTake: () => void;
@@ -122,6 +142,8 @@ function capture(state: DeskState): HistorySnap {
     page: state.page,
     curve: state.curve,
     steers: state.steers,
+    factors: state.factors,
+    plane: state.plane,
   };
 }
 
@@ -166,6 +188,8 @@ function project(state: DeskState, kept: number[]): HistorySnap {
     page: pageFor(cursor),
     curve: state.curve,
     steers: state.steers,
+    factors: state.factors,
+    plane: state.plane,
   };
 }
 
@@ -180,8 +204,17 @@ function keptIndexes(state: DeskState, keepUntil: number) {
 
 function cutTo(state: DeskState, keepUntil: number) {
   const kept = keptIndexes(state, keepUntil);
-  if (kept.length === state.lines.length && kept.every((index, order) => index === order)) return state;
-  return { ...edited(state, project(state, kept)), freshIndex: null };
+  if (kept.length === state.lines.length && kept.every((index, order) => index === order)) {
+    return state.rewinding && keepUntil >= state.cursor ? { ...state, rewinding: false } : state;
+  }
+  const rewinding = state.gesturing && keepUntil < state.cursor;
+  return {
+    ...edited(state, project(state, kept)),
+    freshIndex: null,
+    rewinding,
+    previews: rewinding ? [] : state.previews,
+    steering: false,
+  };
 }
 
 function takeFrom(state: DeskState) {
@@ -210,10 +243,16 @@ function takeFrom(state: DeskState) {
       variant: (state.variant + 1) % 4,
     }),
     freshIndex: index,
+    rewinding: false,
+    previews: [],
+    steering: false,
+    steerMoved: false,
   };
 }
 
-function mergeSpan(state: DeskState, lineIndex: number, wordStart: number, wordEnd: number) {
+const INITIAL_FACTORS = withPlane(FACTORS, INITIAL_PLANE.x, INITIAL_PLANE.y);
+
+function mergeSpan(state: DeskState, lineIndex: number, wordStart: number, wordEnd: number, hue: string) {
   const start = Math.min(wordStart, wordEnd);
   const end = Math.max(wordStart, wordEnd);
   const overlapping = state.boxes.filter(
@@ -233,6 +272,7 @@ function mergeSpan(state: DeskState, lineIndex: number, wordStart: number, wordE
         wordStart: mergedStart,
         wordEnd: mergedEnd,
         weight: kept?.weight ?? 0.8,
+        hue,
       },
     ],
     selectedBoxId: id,
@@ -252,20 +292,107 @@ export const useDesk = create<DeskState>((set) => ({
   history: [],
   gesturing: false,
   boxes: [
-    { id: "box-pagina", lineIndex: 6, wordStart: 8, wordEnd: 11, weight: 0.9 },
-    { id: "box-puente", lineIndex: 4, wordStart: 11, wordEnd: 13, weight: 0.72 },
-    { id: "box-nina", lineIndex: 2, wordStart: 0, wordEnd: 1, weight: 0.5 },
+    { id: "box-pagina", lineIndex: 6, wordStart: 8, wordEnd: 11, weight: 0.9, hue: vectorPaint(0.55, -0.8).color },
+    { id: "box-puente", lineIndex: 4, wordStart: 11, wordEnd: 13, weight: 0.72, hue: vectorPaint(-0.82, 0.2).color },
+    { id: "box-nina", lineIndex: 2, wordStart: 0, wordEnd: 1, weight: 0.5, hue: vectorPaint(0.92, 0.4).color },
   ],
   selectedBoxId: "box-pagina",
-  factors: FACTORS,
+  factors: INITIAL_FACTORS,
   activeFactor: "tono",
   curve: "closed",
-  steers: [],
+  steers: PLANE_STEERS,
+  plane: INITIAL_PLANE,
+  steering: false,
+  steerMoved: false,
+  rewinding: false,
+  previews: [],
+  anchors: [],
   docs: SAMPLE_DOCS,
   drawerOpen: false,
-  checks: initialChecks(INITIAL_LINES, INITIAL_LINES.length, FACTORS),
+  checks: initialChecks(INITIAL_LINES, INITIAL_LINES.length, INITIAL_FACTORS),
   setCursor: (next) => set((state) => cutTo(state, next)),
-  step: (direction) => set((state) => (direction < 0 ? cutTo(state, state.cursor - 1) : takeFrom(state))),
+  seekCursor: (target) =>
+    set((state) => {
+      const next = Math.max(0, Math.min(state.lines.length, Math.round(target)));
+      if (next >= state.lines.length) return state;
+      return cutTo(state, next);
+    }),
+  setPlane: (x, y) =>
+    set((state) => {
+      const nextX = Math.max(-1, Math.min(1, x));
+      const nextY = Math.max(-1, Math.min(1, y));
+      const moved = Math.hypot(nextX - state.plane.x, nextY - state.plane.y) > 0.02;
+      return {
+        plane: { x: nextX, y: nextY },
+        factors: withPlane(state.factors, nextX, nextY),
+        steers: PLANE_STEERS,
+        steerMoved: state.steering ? state.steerMoved || moved : state.steerMoved,
+      };
+    }),
+  beginSteer: () =>
+    set((state) => {
+      if (state.steering) return state;
+      const history = [...state.history, capture(state)].slice(-40);
+      const trimmed = state.cursor < state.lines.length ? project(state, keptIndexes(state, state.cursor)) : null;
+      const lines = trimmed?.lines ?? state.lines;
+      const cursor = trimmed?.cursor ?? state.cursor;
+      const boxes = trimmed?.boxes ?? state.boxes;
+      const previews = SPECULATIVE_ANCHORS.map(
+        (anchor) =>
+          composeBeat({
+            lines,
+            cursor,
+            boxes,
+            factors: withPlane(state.factors, anchor.x, anchor.y),
+            docs: state.docs,
+            activeFactor: state.activeFactor,
+            steers: PLANE_STEERS,
+            variant: state.variant,
+          }).sentence,
+      );
+      return {
+        ...(trimmed ?? {}),
+        history,
+        steering: true,
+        steerMoved: false,
+        anchors: SPECULATIVE_ANCHORS,
+        previews,
+        freshIndex: trimmed ? null : state.freshIndex,
+      };
+    }),
+  endSteer: () =>
+    set((state) => {
+      if (!state.steering) return { steerMoved: false, previews: [] };
+      const previous = state.history[state.history.length - 1];
+      const same =
+        previous !== undefined &&
+        previous.plane.x === state.plane.x &&
+        previous.plane.y === state.plane.y &&
+        previous.cursor === state.cursor &&
+        previous.lines.length === state.lines.length;
+      return {
+        steering: false,
+        steerMoved: false,
+        previews: [],
+        history: same ? state.history.slice(0, -1) : state.history,
+      };
+    }),
+  step: (direction) =>
+    set((state) => {
+      if (direction > 0) return takeFrom(state);
+      const next = cutTo(state, state.cursor - 1);
+      const lines = next.lines ?? state.lines;
+      const cursor = next.cursor ?? state.cursor;
+      const plane = planeFromPassage(lines, cursor);
+      return {
+        ...next,
+        plane,
+        factors: withPlane(state.factors, plane.x, plane.y),
+        steers: PLANE_STEERS,
+        rewinding: false,
+        previews: [],
+      };
+    }),
   beginGesture: () =>
     set((state) => {
       if (state.gesturing) return state;
@@ -280,9 +407,22 @@ export const useDesk = create<DeskState>((set) => ({
         previous.cursor === state.cursor &&
         previous.lines.length === state.lines.length &&
         previous.lines.every((line, index) => line === state.lines[index]);
+      const rewound = previous !== undefined && state.cursor < previous.cursor;
+      const adopted = rewound ? planeFromPassage(state.lines, state.cursor) : null;
       return {
         gesturing: false,
+        rewinding: false,
+        steering: false,
+        steerMoved: false,
+        previews: [],
         history: unchanged ? state.history.slice(0, -1) : state.history,
+        ...(adopted
+          ? {
+              plane: adopted,
+              factors: withPlane(state.factors, adopted.x, adopted.y),
+              steers: PLANE_STEERS,
+            }
+          : null),
       };
     }),
   undo: () =>
@@ -295,6 +435,10 @@ export const useDesk = create<DeskState>((set) => ({
         history: state.history.slice(0, -1),
         gesturing: false,
         freshIndex: null,
+        steering: false,
+        steerMoved: false,
+        rewinding: false,
+        previews: [],
       };
     }),
   cutTo: (keepUntil) => set((state) => cutTo(state, keepUntil)),
@@ -330,25 +474,30 @@ export const useDesk = create<DeskState>((set) => ({
         return { selectedBoxId: existing.id };
       }
       if (existing) return { selectedBoxId: existing.id };
-      return mergeSpan(state, lineIndex, wordIndex, wordIndex);
+      return mergeSpan(state, lineIndex, wordIndex, wordIndex, vectorPaint(state.plane.x, state.plane.y).color);
     }),
-  addSpan: (lineIndex, wordStart, wordEnd) => set((state) => mergeSpan(state, lineIndex, wordStart, wordEnd)),
+  addSpan: (lineIndex, wordStart, wordEnd) =>
+    set((state) => mergeSpan(state, lineIndex, wordStart, wordEnd, vectorPaint(state.plane.x, state.plane.y).color)),
   moveBox: (id, lineIndex, wordIndex) =>
-    set((state) => ({
-      boxes: state.boxes.map((box) => {
-        if (box.id !== id) return box;
-        const length = box.wordEnd - box.wordStart;
-        const last = Math.max(0, wordsOf(state.lines[lineIndex] ?? "").length - 1);
-        const wordStart = Math.max(0, Math.min(wordIndex, last));
-        return {
-          ...box,
-          lineIndex,
-          wordStart,
-          wordEnd: Math.min(last, wordStart + length),
-        };
-      }),
-      selectedBoxId: id,
-    })),
+    set((state) => {
+      const hue = vectorPaint(state.plane.x, state.plane.y).color;
+      return {
+        boxes: state.boxes.map((box) => {
+          if (box.id !== id) return box;
+          const length = box.wordEnd - box.wordStart;
+          const last = Math.max(0, wordsOf(state.lines[lineIndex] ?? "").length - 1);
+          const wordStart = Math.max(0, Math.min(wordIndex, last));
+          return {
+            ...box,
+            lineIndex,
+            wordStart,
+            wordEnd: Math.min(last, wordStart + length),
+            hue,
+          };
+        }),
+        selectedBoxId: id,
+      };
+    }),
   setBoxWeight: (id, weight) =>
     set((state) => ({
       boxes: state.boxes.map((box) =>
@@ -409,6 +558,9 @@ export const useDesk = create<DeskState>((set) => ({
       for (const index of snapshot.blocked ?? []) {
         if (index >= 0 && index < lines.length) blocked[index] = true;
       }
+      const source = snapshot.factors.length > 0 ? snapshot.factors : FACTORS;
+      const plane = snapshot.plane ?? planeOfFactors(source);
+      const factors = withPlane(source, plane.x, plane.y);
       return {
         lines,
         origins,
@@ -423,12 +575,18 @@ export const useDesk = create<DeskState>((set) => ({
         gesturing: false,
         boxes: snapshot.boxes,
         selectedBoxId: snapshot.boxes[0]?.id ?? null,
-        factors: snapshot.factors.length > 0 ? snapshot.factors : FACTORS,
-        activeFactor: snapshot.factors[0]?.id ?? "tono",
+        factors,
+        activeFactor: factors[0]?.id ?? "tono",
         curve: "closed",
-        steers: [],
+        steers: PLANE_STEERS,
+        plane,
+        steering: false,
+        steerMoved: false,
+        rewinding: false,
+        previews: [],
+        anchors: [],
         docs: snapshot.docs,
-        checks: initialChecks(lines, cursor, snapshot.factors.length > 0 ? snapshot.factors : FACTORS),
+        checks: initialChecks(lines, cursor, factors),
       };
     }),
 }));

@@ -190,6 +190,7 @@ function snapshotFrom(state: ReturnType<typeof useDesk.getState>): DeskSnapshot 
     cursor: state.cursor,
     variant: state.variant,
     blocked: Object.keys(state.blocked).map(Number),
+    plane: state.plane,
   };
 }
 

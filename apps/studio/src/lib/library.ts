@@ -19,6 +19,7 @@ export type DeskSnapshot = {
   cursor: number;
   variant: number;
   blocked?: number[];
+  plane?: { x: number; y: number };
 };
 
 const SESSION_KEY = "maestro.session.v1";
