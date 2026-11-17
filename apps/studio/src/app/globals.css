@@ -134,10 +134,22 @@ body {
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
 }
 
+.vector-shimmer {
+  stroke-dasharray: 5 7;
+  animation: vector-spin 0.9s linear infinite;
+}
+
+@keyframes vector-spin {
+  to {
+    stroke-dashoffset: -24;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .bar-fill,
   .reel-shimmer::after,
-  .caret {
+  .caret,
+  .vector-shimmer {
     animation: none;
   }
 }

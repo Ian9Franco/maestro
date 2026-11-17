@@ -4,7 +4,15 @@ import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { composeBeat } from "@/lib/prompt";
 import { PAGE_SIZE, useDesk } from "@/lib/store";
-import { type AttentionBox, coversWord, wordsOf } from "@/lib/text";
+import {
+  type AttentionBox,
+  coversWord,
+  nearestAnchor,
+  paintAlpha,
+  realizedSentences,
+  vectorPaint,
+  wordsOf,
+} from "@/lib/text";
 
 type WordRect = {
   line: number;
@@ -15,13 +23,12 @@ type WordRect = {
   h: number;
 };
 
-type Point = { x: number; y: number };
-
 type Drag =
   | { kind: "move"; id: string; dx: number; dy: number; x: number; y: number }
   | { kind: "weight"; id: string; startX: number; startWeight: number }
-  | { kind: "select"; anchorLine: number; anchorWord: number; line: number; word: number }
-  | { kind: "play"; anchorBottom: number; generated: number; startX: number; startY: number; moved: boolean };
+  | { kind: "select"; anchorLine: number; anchorWord: number; line: number; word: number };
+
+const REALIZED_LABEL = { tono: "tono", foco: "foco", tension: "tensión" } as const;
 
 export function Manuscript({ onHeight }: { onHeight: (index: number, height: number) => void }) {
   const lines = useDesk((state) => state.lines);
@@ -33,15 +40,16 @@ export function Manuscript({ onHeight }: { onHeight: (index: number, height: num
   const page = useDesk((state) => state.page);
   const blocked = useDesk((state) => state.blocked);
   const toggleBlock = useDesk((state) => state.toggleBlock);
-  const cutTo = useDesk((state) => state.cutTo);
-  const writeTake = useDesk((state) => state.writeTake);
-  const beginGesture = useDesk((state) => state.beginGesture);
-  const endGesture = useDesk((state) => state.endGesture);
   const factors = useDesk((state) => state.factors);
   const activeFactor = useDesk((state) => state.activeFactor);
   const steers = useDesk((state) => state.steers);
-  const curve = useDesk((state) => state.curve);
-  const toggleOrigin = useDesk((state) => state.toggleOrigin);
+  const plane = useDesk((state) => state.plane);
+  const steering = useDesk((state) => state.steering);
+  const steerMoved = useDesk((state) => state.steerMoved);
+  const previews = useDesk((state) => state.previews);
+  const anchors = useDesk((state) => state.anchors);
+  const rewinding = useDesk((state) => state.rewinding);
+  const checks = useDesk((state) => state.checks);
   const docs = useDesk((state) => state.docs);
   const variant = useDesk((state) => state.variant);
   const addBox = useDesk((state) => state.addBox);
@@ -56,7 +64,6 @@ export function Manuscript({ onHeight }: { onHeight: (index: number, height: num
   const wordsRef = useRef<WordRect[]>([]);
   const dragRef = useRef<Drag | null>(null);
   const [words, setWords] = useState<WordRect[]>([]);
-  const [caret, setCaret] = useState<Point | null>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
 
   const measure = useCallback(() => {
@@ -78,16 +85,8 @@ export function Manuscript({ onHeight }: { onHeight: (index: number, height: num
     content.querySelectorAll<HTMLElement>("[data-row]").forEach((element) => {
       onHeight(Number(element.dataset.row), element.getBoundingClientRect().height);
     });
-    const caretEl = content.querySelector<HTMLElement>("[data-caret]");
-    const nextCaret = caretEl
-      ? {
-          x: caretEl.getBoundingClientRect().left - origin.left,
-          y: caretEl.getBoundingClientRect().top - origin.top + caretEl.getBoundingClientRect().height / 2,
-        }
-      : null;
     wordsRef.current = next;
     setWords((current) => (sameWords(current, next) ? current : next));
-    setCaret((current) => (samePoint(current, nextCaret) ? current : nextCaret));
   }, [onHeight]);
 
   useLayoutEffect(() => {
@@ -111,14 +110,8 @@ export function Manuscript({ onHeight }: { onHeight: (index: number, height: num
 
   useEffect(() => {
     if (freshIndex === null) return;
-    let frame = 0;
-    const tick = () => {
-      measure();
-      frame = requestAnimationFrame(tick);
-    };
-    frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
-  }, [freshIndex, measure]);
+    settleFresh();
+  }, [freshIndex, settleFresh]);
 
   useEffect(() => {
     function move(event: PointerEvent) {
@@ -146,31 +139,6 @@ export function Manuscript({ onHeight }: { onHeight: (index: number, height: num
         setDrag(next);
         return;
       }
-      if (current.kind === "play") {
-        const content = contentRef.current;
-        const origin = content?.getBoundingClientRect();
-        if (!content || !origin) return;
-        const moved = current.moved || Math.hypot(event.clientX - current.startX, event.clientY - current.startY) > 8;
-        if (!moved) return;
-        const playing = { ...current, moved: true };
-        dragRef.current = playing;
-        const y = event.clientY;
-        if (y > playing.anchorBottom + 28) {
-          const want = Math.min(3, Math.floor((y - playing.anchorBottom) / 34));
-          while (dragRef.current?.kind === "play" && dragRef.current.generated < want) {
-            dragRef.current = { ...dragRef.current, generated: dragRef.current.generated + 1 };
-            writeTake();
-          }
-          return;
-        }
-        const rows = [...content.querySelectorAll<HTMLElement>("[data-row]")];
-        let keep = page * PAGE_SIZE;
-        for (const row of rows) {
-          if (y >= row.getBoundingClientRect().top) keep = Number(row.dataset.row) + 1;
-        }
-        cutTo(keep);
-        return;
-      }
       setBoxWeight(current.id, current.startWeight + (event.clientX - current.startX) / 140);
     }
     function up() {
@@ -188,10 +156,6 @@ export function Manuscript({ onHeight }: { onHeight: (index: number, height: num
           for (const span of spans) addSpan(span.line, span.start, span.end);
         }
       }
-      if (current.kind === "play") {
-        endGesture();
-        if (!current.moved && current.generated === 0) toggleOrigin();
-      }
       setDrag(null);
     }
     window.addEventListener("pointermove", move);
@@ -200,7 +164,7 @@ export function Manuscript({ onHeight }: { onHeight: (index: number, height: num
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
     };
-  }, [addSpan, cutTo, endGesture, lines, moveBox, page, setBoxWeight, toggleOrigin, writeTake]);
+  }, [addSpan, lines, moveBox, setBoxWeight]);
 
   function extendTo(line: number, word: number) {
     const selected = boxes.find((box) => box.id === selectedBoxId);
@@ -244,24 +208,6 @@ export function Manuscript({ onHeight }: { onHeight: (index: number, height: num
     selectBox(id);
   }
 
-  function beginPlay(event: ReactPointerEvent<HTMLElement>) {
-    event.preventDefault();
-    event.stopPropagation();
-    const rows = contentRef.current?.querySelectorAll<HTMLElement>("[data-row]");
-    const last = rows && rows.length > 0 ? rows[rows.length - 1] : null;
-    beginGesture();
-    const next: Drag = {
-      kind: "play",
-      anchorBottom: last ? last.getBoundingClientRect().bottom : event.clientY,
-      generated: 0,
-      startX: event.clientX,
-      startY: event.clientY,
-      moved: false,
-    };
-    dragRef.current = next;
-    setDrag(next);
-  }
-
   function beginWeight(event: ReactPointerEvent<HTMLElement>, id: string, weight: number) {
     event.stopPropagation();
     event.preventDefault();
@@ -297,24 +243,32 @@ export function Manuscript({ onHeight }: { onHeight: (index: number, height: num
           variant,
         })
       : null;
+  const paint = vectorPaint(plane.x, plane.y);
+  const speculative =
+    steering && steerMoved && previews.length > 0 ? previews[nearestAnchor(plane, anchors)] : undefined;
+  const preview = speculative ?? beat?.sentence ?? null;
   const futureHere = cursor === 0 ? page === 0 : page === Math.floor((cursor - 1) / PAGE_SIZE);
+  const pageStart = page * PAGE_SIZE;
+  const pageEnd = Math.min(cursor, pageStart + PAGE_SIZE);
+  const realized = realizedSentences(checks, pageStart, pageEnd);
 
   return (
     <div
       ref={contentRef}
-      className={`relative min-w-0 ${curve === "closed" ? "pb-28 sm:pb-36" : "pb-[min(52vh,420px)] sm:pb-[420px]"}`}
-      title="Arrastrá de una palabra a otra para fijar una frase. Un clic en el punto abre las curvas. Arrastrarlo: arriba recorta, abajo escribe."
+      className="relative min-w-0 pb-80"
+      title="Arrastrá de una palabra a otra para fijar atención. El circulito mezcla el vector. La barra de abajo rebobina o escribe."
     >
       <div className="h-8" />
       <AnimatePresence initial={false}>
-        {lines.slice(page * PAGE_SIZE, Math.min(cursor, page * PAGE_SIZE + PAGE_SIZE)).map((line, offset) => {
-          const index = page * PAGE_SIZE + offset;
+        {lines.slice(pageStart, pageEnd).map((line, offset) => {
+          const index = pageStart + offset;
           const onPageEnd = index === cursor - 1;
+          const mark = realized.find((item) => item.index === index);
           return (
           <motion.div
             key={index}
-            exit={{ opacity: 0, y: -6 }}
-            transition={{ duration: 0.15 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0 }}
             data-row={index}
             className="flex items-start gap-3 py-px pr-4"
           >
@@ -327,78 +281,105 @@ export function Manuscript({ onHeight }: { onHeight: (index: number, height: num
               {index + 1}
             </button>
             <p className="mono min-w-0 flex-1 text-[13.5px] leading-[22px] tracking-[-0.01em] text-[#d4d4d4]">
-              {freshIndex === index ? (
-                <TypedLine text={line} onDone={settleFresh} />
-              ) : (
-                <LineWords
-                  line={line}
-                  index={index}
-                  boxes={boxes}
-                  pending={pending}
-                  selectedBoxId={selectedBoxId}
-                  onCreate={addBox}
-                  onDragStart={beginMove}
-                  onSelectStart={beginSelect}
-                  onExtend={extendTo}
-                />
-              )}
+              <LineWords
+                line={line}
+                index={index}
+                boxes={boxes}
+                pending={pending}
+                selectedBoxId={selectedBoxId}
+                accent={paint.color}
+                onCreate={addBox}
+                onDragStart={beginMove}
+                onSelectStart={beginSelect}
+                onExtend={extendTo}
+              />
               {onPageEnd ? <span data-caret className="inline-block h-[1em] w-px align-middle" /> : null}
+              {mark ? (
+                <span
+                  data-realized={mark.factor}
+                  className="ml-2 text-[10px] whitespace-nowrap text-[#3ddc86]"
+                  title={`Esta oración realizó ${REALIZED_LABEL[mark.factor]}`}
+                >
+                  ✓ {REALIZED_LABEL[mark.factor]}
+                </span>
+              ) : null}
             </p>
           </motion.div>
           );
         })}
       </AnimatePresence>
-      {futureHere && beat ? (
-        <div className="flex items-start gap-3 py-px pr-4">
+      {futureHere && preview && !rewinding ? (
+        <div data-future className="flex items-start gap-3 py-px pr-4">
           <span className="mono w-6 shrink-0 text-right text-[11px] leading-[22px] text-[#ff8a5a]/70">+</span>
-          <p className="mono min-w-0 flex-1 text-[13.5px] leading-[22px] text-white/35">{beat.sentence}</p>
+          <p
+            className="mono min-w-0 flex-1 text-[13.5px] leading-[22px]"
+            style={{
+              color: steering && steerMoved ? paint.color : "rgba(255,255,255,0.35)",
+              transition: "color 200ms ease",
+            }}
+          >
+            {preview}
+          </p>
         </div>
-      ) : null}
-
-      {caret ? (
-        <button
-          type="button"
-          aria-label="Punto de escritura. Un clic abre las curvas. Arriba recorta, abajo genera."
-          className="absolute z-30 h-11 w-11 -translate-x-1/2 -translate-y-1/2 cursor-ns-resize rounded-full border-2 border-[#ff4b2a] bg-white shadow-[0_0_10px_rgba(255,70,40,0.85)] touch-none sm:h-4 sm:w-4 sm:border"
-          style={{ left: caret.x, top: caret.y }}
-          onPointerDown={beginPlay}
-        />
       ) : null}
 
       {boxes.map((box) => {
         const covered = words.filter((item) => item.line === box.lineIndex && coversWord(box, item.word));
-        const word = covered[covered.length - 1];
-        if (!word || box.id !== selectedBoxId) return null;
+        if (covered.length === 0) return null;
         if (drag?.kind === "move" && drag.id === box.id) return null;
+        const hue = box.hue ?? paint.color;
+        const left = Math.min(...covered.map((item) => item.x));
+        const top = Math.min(...covered.map((item) => item.y));
+        const right = Math.max(...covered.map((item) => item.x + item.w));
+        const bottom = Math.max(...covered.map((item) => item.y + item.h));
+        const word = covered[covered.length - 1];
+        if (!word) return null;
+        const selected = box.id === selectedBoxId;
         return (
           <div key={box.id}>
-            <button
-              type="button"
-              aria-label="Quitar atención"
-              className="absolute z-20 flex h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-[#ff5a32]/80 bg-black text-[9px] leading-none text-[#ffb7a4]"
-              style={{ left: word.x + word.w - 1, top: word.y - 1 }}
-              onPointerDown={(event) => event.stopPropagation()}
-              onClick={(event) => {
-                event.stopPropagation();
-                removeBox(box.id);
-              }}
-            >
-              ×
-            </button>
             <span
-              data-handle="weight"
-              title={`Atención ${box.weight.toFixed(1)}`}
-              aria-label="Peso de atención"
-              role="slider"
-              aria-valuemin={0.15}
-              aria-valuemax={1}
-              aria-valuenow={Number(box.weight.toFixed(2))}
-              className="absolute z-20 flex h-4 w-4 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize items-center justify-center"
-              style={{ left: word.x + word.w / 2, top: word.y + word.h + 4 }}
-              onPointerDown={(event) => beginWeight(event, box.id, box.weight)}
-            >
-              <span className="h-2 w-2 rounded-full bg-[#ff5a32] shadow-[0_0_8px_rgba(255,80,40,0.85)]" />
-            </span>
+              className="pointer-events-none absolute rounded-[3px]"
+              style={{
+                left: left - 3,
+                top: top - 1,
+                width: right - left + 6,
+                height: bottom - top + 2,
+                backgroundColor: paintAlpha(hue, selected ? 0.2 : 0.12),
+                border: `1px solid ${paintAlpha(hue, selected ? 0.85 : 0.45)}`,
+                transition: "background-color 200ms ease, border-color 200ms ease",
+              }}
+            />
+            {selected ? (
+              <>
+                <button
+                  type="button"
+                  aria-label="Quitar atención"
+                  className="absolute z-20 flex h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border bg-black text-[9px] leading-none"
+                  style={{ left: word.x + word.w - 1, top: word.y - 1, borderColor: hue, color: hue }}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    removeBox(box.id);
+                  }}
+                >
+                  ×
+                </button>
+                <span
+                  data-handle="weight"
+                  title={`Atención ${box.weight.toFixed(1)}`}
+                  aria-label="Peso de atención"
+                  role="slider"
+                  aria-valuemin={0.15}
+                  aria-valuemax={1}
+                  aria-valuenow={Number(box.weight.toFixed(2))}
+                  className="absolute z-20 flex h-4 w-4 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize items-center justify-center"
+                  style={{ left: word.x + word.w / 2, top: word.y + word.h + 4 }}
+                  onPointerDown={(event) => beginWeight(event, box.id, box.weight)}
+                >
+                  <span className="h-2 w-2 rounded-full" style={{ background: hue, boxShadow: `0 0 8px ${hue}` }} />
+                </span>
+              </>
+            ) : null}
           </div>
         );
       })}
@@ -412,6 +393,7 @@ function LineWords({
   boxes,
   pending,
   selectedBoxId,
+  accent,
   onCreate,
   onDragStart,
   onSelectStart,
@@ -422,6 +404,7 @@ function LineWords({
   boxes: AttentionBox[];
   pending: { line: number; start: number; end: number }[];
   selectedBoxId: string | null;
+  accent: string;
   onCreate: (lineIndex: number, wordIndex: number) => void;
   onDragStart: (event: ReactPointerEvent<HTMLElement>, id: string) => void;
   onSelectStart: (line: number, word: number) => void;
@@ -433,6 +416,8 @@ function LineWords({
       {words.map((word, wordIndex) => {
         const box = boxes.find((item) => item.lineIndex === index && coversWord(item, wordIndex));
         const marked = Boolean(box);
+        const hue = box?.hue ?? accent;
+        const pinned = Boolean(box && wordIndex === Math.max(box.wordStart, box.wordEnd));
         const selected = box?.id === selectedBoxId;
         const drafting = pending.some((span) => span.line === index && wordIndex >= span.start && wordIndex <= span.end);
         const lit = selected || drafting;
@@ -445,11 +430,15 @@ function LineWords({
               aria-label={marked ? `Mover atención de ${word}` : `Fijar ${word}`}
               data-word-index={wordIndex}
               data-line={index}
-              data-pin={box && wordIndex === Math.max(box.wordStart, box.wordEnd) ? box.id : undefined}
-              className={`rounded-[2px] ${lit ? "bg-white text-black" : marked ? "cursor-grab touch-none text-white" : "cursor-pointer"}`}
+              data-pin={pinned ? box?.id : undefined}
+              data-pin-hue={pinned ? hue : undefined}
+              className={`rounded-[2px] ${lit ? "bg-white text-black" : marked ? "cursor-grab touch-none" : "cursor-pointer"}`}
               style={{
-                boxShadow: marked && !lit ? "inset 0 -1px 0 rgba(255,92,48,0.95)" : undefined,
+                color: marked && !lit ? hue : undefined,
+                backgroundColor: marked && !lit ? paintAlpha(hue, 0.22) : undefined,
+                boxShadow: marked && !lit ? `inset 0 -1px 0 ${hue}` : undefined,
                 padding: lit ? "0 1px" : undefined,
+                transition: "color 200ms ease, background-color 200ms ease, box-shadow 200ms ease",
               }}
               onDoubleClick={(event) => {
                 event.preventDefault();
@@ -483,31 +472,6 @@ function LineWords({
   );
 }
 
-function TypedLine({ text, onDone }: { text: string; onDone: () => void }) {
-  const reduce = usePrefersReducedMotion();
-  const [count, setCount] = useState(reduce ? text.length : 0);
-  const done = useRef(false);
-
-  useEffect(() => {
-    if (count >= text.length) {
-      if (!done.current) {
-        done.current = true;
-        onDone();
-      }
-      return;
-    }
-    const timeout = window.setTimeout(() => setCount((value) => value + 1), 22);
-    return () => window.clearTimeout(timeout);
-  }, [count, onDone, text.length]);
-
-  return (
-    <>
-      {text.slice(0, count)}
-      {count < text.length ? <span className="caret" /> : null}
-    </>
-  );
-}
-
 function sameWords(current: WordRect[], next: WordRect[]) {
   if (current.length !== next.length) return false;
   return current.every((item, index) => {
@@ -522,11 +486,6 @@ function sameWords(current: WordRect[], next: WordRect[]) {
       Math.abs(item.h - other.h) < 0.5
     );
   });
-}
-
-function samePoint(current: Point | null, next: Point | null) {
-  if (current === null || next === null) return current === next;
-  return Math.abs(current.x - next.x) < 0.5 && Math.abs(current.y - next.y) < 0.5;
 }
 
 function rangeSpans(
@@ -565,16 +524,4 @@ function closestWord(words: WordRect[], x: number, y: number) {
     }
   }
   return best;
-}
-
-function usePrefersReducedMotion() {
-  const [reduce, setReduce] = useState(false);
-  useEffect(() => {
-    const query = window.matchMedia("(prefers-reduced-motion: reduce)");
-    setReduce(query.matches);
-    const onChange = () => setReduce(query.matches);
-    query.addEventListener("change", onChange);
-    return () => query.removeEventListener("change", onChange);
-  }, []);
-  return reduce;
 }

@@ -4,10 +4,10 @@ Mesa para dirigir una historia línea por línea. La primera versión es la inte
 
 ## Qué se puede hacer
 
-- Avanzar y rebobinar el playhead. Lo ya escrito vuelve desde caché. Una línea nueva se tipea en el momento.
-- Fijar atención con doble clic sobre una palabra. La caja se arrastra, encaja en otra palabra y cambia de peso desde la esquina.
-- Un clic en el punto abre el anillo de curvas del pasaje. Elegir una la despliega desde la cruz: el trazo rojo llega hasta la aguja y el rumbo queda en la columna. Arrastrar el punto sigue recortando hacia arriba y escribiendo hacia abajo.
-- Las frases fijadas llegan al punto con línea continua. Una lectura que todavía no es rumbo llega punteada y, mientras se asienta, dice «realizado».
+- Arrastrar el circulito en el plano mezcla el vector de lo que sigue: tono en horizontal, foco en vertical y tensión según la distancia al centro. El anillo se pone rojo y grueso cuando hay más tensión. El texto nuevo se tiñe con ese color. El circulito no escribe ni borra.
+- El playhead solo se mueve arrastrando la barra. Hacia atrás vacía el futuro: el circulito se apaga, el anillo pulsa y, al soltar, vuelve con el color de ese punto. Desde el final, hacia la derecha, escribe una oración.
+- Fijar atención con doble clic o arrastrando sobre palabras. La caja y la línea punteada hacia el carrete usan el color del vector con el que se creó. Un check verde marca la oración que realizó tono, foco o tensión.
+- Las lecturas que todavía no son rumbo llegan punteadas y, mientras se asientan, dicen «realizado».
 - Pegar o soltar documentos de personaje, saga, lore o notas. Maestro los parte en spans. Todavía no se envían a un modelo.
 
 ## Cómo correrlo

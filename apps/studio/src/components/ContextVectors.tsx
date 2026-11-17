@@ -23,16 +23,20 @@ export function ContextVectors() {
     function measure() {
       const caret = pointOf(document.querySelector("[data-caret]"));
       const next: Segment[] = [];
+      for (const pin of document.querySelectorAll<HTMLElement>("[data-pin]")) {
+        const at = pointOf(pin);
+        if (!at) continue;
+        const reel = pointOf(document.querySelector(`[data-reel-row="${pin.dataset.line}"]`));
+        const from = reel ?? caret;
+        if (!from) continue;
+        next.push({
+          key: `pin-${pin.dataset.pin}`,
+          d: line(from, at),
+          stroke: pin.dataset.pinHue || "rgba(255,255,255,0.72)",
+          dash: "2 4",
+        });
+      }
       if (caret) {
-        for (const pin of document.querySelectorAll<HTMLElement>("[data-pin]")) {
-          const at = pointOf(pin);
-          if (!at) continue;
-          next.push({
-            key: `pin-${pin.dataset.pin}`,
-            d: line(caret, at),
-            stroke: "rgba(255,255,255,0.72)",
-          });
-        }
         for (const dot of document.querySelectorAll<HTMLElement>("[data-factor-dot]")) {
           const at = pointOf(dot);
           if (!at || dot.getBoundingClientRect().width <= 0) continue;
@@ -76,10 +80,10 @@ export function ContextVectors() {
           key={segment.key}
           d={segment.d}
           fill="none"
-          stroke={segment.stroke}
-          strokeWidth={1.05}
+          strokeWidth={1}
           strokeLinecap="round"
           strokeDasharray={segment.dash}
+          style={{ stroke: segment.stroke, transition: "stroke 200ms ease" }}
         />
       ))}
     </svg>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { PAGE_SIZE, useDesk } from "@/lib/store";
 import { passageBoxes, wordsOf } from "@/lib/text";
 
@@ -10,7 +10,8 @@ export function Timeline() {
   const freshIndex = useDesk((state) => state.freshIndex);
   const page = useDesk((state) => state.page);
   const history = useDesk((state) => state.history.length);
-  const cutTo = useDesk((state) => state.cutTo);
+  const seekCursor = useDesk((state) => state.seekCursor);
+  const writeTake = useDesk((state) => state.writeTake);
   const beginGesture = useDesk((state) => state.beginGesture);
   const endGesture = useDesk((state) => state.endGesture);
   const undo = useDesk((state) => state.undo);
@@ -20,14 +21,50 @@ export function Timeline() {
   const activeFactor = useDesk((state) => state.activeFactor);
   const setPage = useDesk((state) => state.setPage);
   const trackRef = useRef<HTMLDivElement>(null);
+  const drag = useRef({ x: 0, atEnd: false, wrote: false, active: false });
 
   function seek(clientX: number) {
     const track = trackRef.current;
     if (!track || lines.length === 0) return;
     const rect = track.getBoundingClientRect();
     const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
-    cutTo(Math.round(ratio * lines.length));
+    seekCursor(Math.round(ratio * lines.length));
   }
+
+  const seekRef = useRef(seek);
+  const writeRef = useRef(writeTake);
+  const endRef = useRef(endGesture);
+  seekRef.current = seek;
+  writeRef.current = writeTake;
+  endRef.current = endGesture;
+
+  useEffect(() => {
+    function move(event: PointerEvent) {
+      if (!drag.current.active || drag.current.wrote || event.buttons === 0) return;
+      const delta = event.clientX - drag.current.x;
+      if (drag.current.atEnd && delta > 0) {
+        if (delta > 18) {
+          drag.current.wrote = true;
+          writeRef.current();
+        }
+        return;
+      }
+      seekRef.current(event.clientX);
+    }
+    function up() {
+      if (!drag.current.active) return;
+      drag.current.active = false;
+      endRef.current();
+    }
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+    };
+  }, []);
 
   const pages = Math.max(1, Math.ceil(Math.max(cursor, 1) / PAGE_SIZE));
 
@@ -82,19 +119,13 @@ export function Timeline() {
         aria-valuemin={0}
         aria-valuemax={lines.length}
         aria-valuenow={cursor}
-        aria-label="Playhead"
+        aria-label="Playhead. Arrastrá para rebobinar. Desde el final, hacia la derecha escribe una oración."
+        title="Arrastrá para rebobinar. Desde el final, hacia la derecha escribe."
         tabIndex={0}
         className="relative h-9 min-h-9 min-w-0 flex-1 cursor-ew-resize touch-none sm:h-full sm:min-h-0"
         onPointerDown={(event) => {
+          drag.current = { x: event.clientX, atEnd: cursor >= lines.length, wrote: false, active: true };
           beginGesture();
-          event.currentTarget.setPointerCapture(event.pointerId);
-          seek(event.clientX);
-        }}
-        onPointerUp={() => {
-          endGesture();
-        }}
-        onPointerMove={(event) => {
-          if (event.currentTarget.hasPointerCapture(event.pointerId)) seek(event.clientX);
         }}
       >
         <div className="absolute top-1/2 right-4 left-2 h-px bg-white/20" />
