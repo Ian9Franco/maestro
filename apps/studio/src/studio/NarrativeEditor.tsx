@@ -14,7 +14,7 @@ import {
   snapToWord,
   tokenAt,
 } from "@/narrative/document";
-import { cycleMode, dialCaption, readDial, SPOKES, withDial, type DialId, type NarrativeDials } from "@/narrative/dials";
+import { cycleMode, dialCaption, fanSpokes, readDial, withDial, type DialId, type NarrativeDials } from "@/narrative/dials";
 import { emotionOf } from "@/narrative/emotion";
 import { createNarrativeExtensions, ghostPreviewKey } from "@/narrative/extensions";
 import { REFERENCE_INTENTS, type ReferenceIntent } from "@/narrative/types";
@@ -499,9 +499,10 @@ export function NarrativeEditor({
       if (!caret) return;
       const hub = { x: caret.x + 6, y: caret.y + caret.h / 2 };
       const point = pointOf(event);
+      const spokes = fanSpokes(hub, fanFloor(layoutRef.current, hub.y));
       if (Math.hypot(point.x - hub.x, point.y - hub.y) < 10) return;
       moved = true;
-      const reading = readDial(hub, point);
+      const reading = readDial(hub, point, spokes);
       const next = withDial(workingDials.current, reading.id, reading.value);
       workingDials.current = next;
       setLiveDials(next);
@@ -556,6 +557,7 @@ export function NarrativeEditor({
           caret={layout.caret}
           dials={liveDials ?? dials}
           active={activeDial}
+          floor={fanFloor(layout, layout.caret.y + layout.caret.h / 2)}
           onCycle={() => callbacks.current.onDials({ ...dialsRef.current, mode: cycleMode(dialsRef.current.mode) })}
         />
       ) : null}
@@ -631,21 +633,27 @@ function DialFan({
   caret,
   dials,
   active,
+  floor,
   onCycle,
 }: {
   caret: Point;
   dials: NarrativeDials;
   active: DialId | null;
+  floor: number;
   onCycle: () => void;
 }) {
   const hub = { x: caret.x + 6, y: caret.y + caret.h / 2 };
+  const spokes = fanSpokes(hub, floor);
   return (
     <div className="pointer-events-none absolute inset-0 z-20">
       <svg aria-hidden className="absolute inset-0 h-full w-full overflow-visible">
-        {SPOKES.map((spoke) => {
-          const end = { x: hub.x + spoke.x, y: hub.y + spoke.y };
+        {spokes.map((spoke) => {
+          const end = { x: spoke.x, y: spoke.y };
           const value = spoke.id === "mode" ? dials.amount : dials[spoke.id];
-          const tip = { x: hub.x + spoke.x * (0.2 + value / 140), y: hub.y + spoke.y * (0.2 + value / 140) };
+          const tip = {
+            x: hub.x + (spoke.x - hub.x) * (0.2 + value / 140),
+            y: hub.y + (spoke.y - hub.y) * (0.2 + value / 140),
+          };
           const bend = bowPoint(hub, tip);
           const hot = spoke.id === active;
           return (
@@ -659,14 +667,14 @@ function DialFan({
           );
         })}
       </svg>
-      {SPOKES.map((spoke) => (
+      {spokes.map((spoke) => (
         <span
           key={spoke.id}
-          className="dial-label pointer-events-auto absolute whitespace-nowrap text-[11px] text-white/75"
+          className="dial-label pointer-events-auto absolute whitespace-nowrap text-[11px] text-white/80"
           style={{
-            left: hub.x + spoke.x,
-            top: hub.y + spoke.y,
-            transform: spoke.x < 0 ? "translate(-100%, -40%)" : "translate(6px, -40%)",
+            left: spoke.x,
+            top: spoke.y,
+            transform: spoke.x < hub.x ? "translate(-100%, -50%)" : "translate(8px, -50%)",
           }}
         >
           {spoke.id === "mode" ? (
@@ -680,6 +688,11 @@ function DialFan({
       ))}
     </div>
   );
+}
+
+function fanFloor(layout: Layout, hubY: number): number {
+  const bottom = layout.blocks.reduce((max, block) => Math.max(max, block.top + block.height), 0);
+  return Math.max(bottom + 28, hubY + 120);
 }
 
 function bowPoint(hub: { x: number; y: number }, tip: { x: number; y: number }): { x: number; y: number } {

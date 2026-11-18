@@ -75,21 +75,40 @@ export function dialCaption(dials: NarrativeDials, id: DialId): string {
 
 type Point = { x: number; y: number };
 
+/** Las características quedan debajo del texto, en el espacio vacío, no encima de las frases. */
+export function fanSpokes(hub: Point, floor: number): { id: DialId; x: number; y: number }[] {
+  return [
+    { id: "mode", x: hub.x + 28, y: hub.y - 26 },
+    { id: "tension", x: hub.x - 190, y: floor },
+    { id: "surprise", x: hub.x + 190, y: floor },
+    { id: "pace", x: hub.x + 70, y: floor + 32 },
+    { id: "distance", x: hub.x - 70, y: floor + 32 },
+  ];
+}
+
 /** Qué eje mira el arrastre, y cuánto (0 a 100) según qué tan lejos se llegó por esa línea. */
-export function readDial(hub: Point, point: Point): { id: DialId; value: number } {
+export function readDial(
+  hub: Point,
+  point: Point,
+  spokes: { id: DialId; x: number; y: number }[] = SPOKES.map((spoke) => ({
+    id: spoke.id,
+    x: hub.x + spoke.x,
+    y: hub.y + spoke.y,
+  })),
+): { id: DialId; value: number } {
   const angle = Math.atan2(point.y - hub.y, point.x - hub.x);
-  let id: DialId = "tension";
+  let id: DialId = spokes[0]?.id ?? "tension";
   let best = Infinity;
-  for (const spoke of SPOKES) {
-    let diff = Math.abs(angle - Math.atan2(spoke.y, spoke.x));
+  for (const spoke of spokes) {
+    let diff = Math.abs(angle - Math.atan2(spoke.y - hub.y, spoke.x - hub.x));
     if (diff > Math.PI) diff = Math.PI * 2 - diff;
     if (diff < best) {
       best = diff;
       id = spoke.id;
     }
   }
-  const spoke = SPOKES.find((item) => item.id === id)!;
-  const end = { x: hub.x + spoke.x, y: hub.y + spoke.y };
+  const spoke = spokes.find((item) => item.id === id)!;
+  const end = { x: spoke.x, y: spoke.y };
   const vx = end.x - hub.x;
   const vy = end.y - hub.y;
   const length = vx * vx + vy * vy || 1;
