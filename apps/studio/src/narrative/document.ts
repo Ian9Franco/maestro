@@ -75,6 +75,104 @@ export function referenceConnected(doc: ProseNode, cursor: number, reference: Li
 
 const WORD_CHAR = /[\p{L}\p{N}'’-]/u;
 
+export type ContextToken = { from: number; to: number; kind: "palabra" | "espacio" | "letra" };
+
+/** Lo que un segundo clic toma: la palabra, el espacio, o una sola letra. */
+export function tokenAt(doc: ProseNode, pos: number): ContextToken | null {
+  const safe = Math.max(0, Math.min(pos, doc.content.size));
+  const resolved = doc.resolve(safe);
+  if (!resolved.parent.isTextblock) return null;
+  const text = resolved.parent.textBetween(0, resolved.parent.content.size, undefined, "\ufffc");
+  if (text.length === 0) return null;
+  const offset = Math.min(resolved.parentOffset, text.length - 1);
+  const char = text[offset] ?? "";
+  const base = resolved.start();
+  if (WORD_CHAR.test(char)) {
+    const word = wordAt(doc, base + offset);
+    return word ? { ...word, kind: "palabra" } : null;
+  }
+  if (/\s/u.test(char)) return { from: base + offset, to: base + offset + 1, kind: "espacio" };
+  return { from: base + offset, to: base + offset + 1, kind: "letra" };
+}
+
+/** El final del párrafo que contiene la posición. Generar nunca parte una palabra. */
+export function endOfBlock(doc: ProseNode, pos: number): number {
+  const safe = Math.max(0, Math.min(pos, doc.content.size));
+  const resolved = doc.resolve(safe);
+  if (!resolved.parent.isTextblock || resolved.depth < 1) return doc.content.size;
+  return resolved.end();
+}
+
+/**
+ * El texto nuevo entra en su propio párrafo, después del bloque del punto de inserción.
+ * Aunque el punto caiga en medio de una palabra, no se intercala.
+ */
+export function placeGenerated(
+  doc: ProseNode,
+  at: number,
+  text: string,
+  blockId: string,
+  generationId: string,
+): { doc: ProseNode; cursor: number } {
+  const schema = doc.type.schema;
+  const mark = schema.marks.generated.create({ id: blockId, generationId });
+  const tr = EditorState.create({ doc }).tr;
+  const edge = endOfBlock(doc, at);
+  const $edge = tr.doc.resolve(Math.max(0, Math.min(edge, tr.doc.content.size)));
+  if (!$edge.parent.isTextblock || $edge.depth < 1) {
+    const paragraph = schema.nodes.paragraph.create(null, schema.text(text, [mark]));
+    tr.insert(tr.doc.content.size, paragraph);
+    return { doc: tr.doc, cursor: tr.doc.content.size - 1 };
+  }
+  if ($edge.parent.content.size === 0) {
+    tr.insert($edge.pos, schema.text(text, [mark]));
+    return { doc: tr.doc, cursor: $edge.pos + text.length };
+  }
+  const after = $edge.after();
+  tr.insert(after, schema.nodes.paragraph.create(null, schema.text(text, [mark])));
+  return { doc: tr.doc, cursor: after + 1 + text.length };
+}
+
+export function generatedSlices(doc: ProseNode, from: number, to: number): { from: number; to: number }[] {
+  const max = doc.content.size;
+  const start = Math.max(0, Math.min(from, to, max));
+  const end = Math.min(max, Math.max(from, to));
+  if (end <= start) return [];
+  const slices: { from: number; to: number }[] = [];
+  doc.nodesBetween(start, end, (node, pos) => {
+    if (!node.isText || !node.marks.some((mark) => mark.type.name === "generated")) return;
+    const sliceFrom = Math.max(start, pos);
+    const sliceTo = Math.min(end, pos + node.nodeSize);
+    if (sliceTo <= sliceFrom) return;
+    const last = slices[slices.length - 1];
+    if (last && last.to === sliceFrom) last.to = sliceTo;
+    else slices.push({ from: sliceFrom, to: sliceTo });
+  });
+  return slices;
+}
+
+/** Borra solo el texto generado del rango. Lo escrito a mano queda. */
+export function eraseGenerated(
+  doc: ProseNode,
+  from: number,
+  to: number,
+): { doc: ProseNode; text: string; ids: { blockId: string; generationId: string }[]; map: (pos: number) => number } | null {
+  const slices = generatedSlices(doc, from, to);
+  if (slices.length === 0) return null;
+  const text = slices.map((slice) => doc.textBetween(slice.from, slice.to, " ")).join(" ");
+  const ids = generatedIdsBetween(doc, slices[0]!.from, slices[slices.length - 1]!.to);
+  const tr = EditorState.create({ doc }).tr;
+  for (const slice of [...slices].reverse()) tr.delete(slice.from, slice.to);
+  const empty: { from: number; to: number }[] = [];
+  tr.doc.forEach((node, offset) => {
+    if (tr.doc.childCount > 1 && node.isTextblock && node.content.size === 0) {
+      empty.push({ from: offset, to: offset + node.nodeSize });
+    }
+  });
+  for (const range of empty.reverse()) tr.delete(range.from, range.to);
+  return { doc: tr.doc, text, ids, map: (pos) => tr.mapping.map(pos, -1) };
+}
+
 export function wordAt(doc: ProseNode, pos: number): { from: number; to: number } | null {
   const safe = Math.max(0, Math.min(pos, doc.content.size));
   const resolved = doc.resolve(safe);

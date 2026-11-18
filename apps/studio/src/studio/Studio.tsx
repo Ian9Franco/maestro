@@ -17,7 +17,7 @@ import { assemblePrompt, renderPrompt } from "@/narrative/prompt";
 import { toSummary, type NarrativeRepository } from "@/narrative/repository";
 import { describeStyle, INSPIRATIONS, mixFromWeights, type InspirationId } from "@/narrative/style";
 import type { ContextDocument, GenerationRecord, ProjectRecord, ProjectSummary } from "@/narrative/types";
-import { joinSentences, PREVIEW_LINES, splitSentences, WORDS_PER_LINE, writeSentences } from "@/narrative/writer";
+import { joinSentences, MAX_LINES, PREVIEW_LINES, splitSentences, WORDS_PER_LINE, writeSentences } from "@/narrative/writer";
 import { ContextPanel } from "@/studio/ContextPanel";
 import { Inspector } from "@/studio/Inspector";
 import type { Discarded, GeneratedBlock } from "@/studio/NarrativeEditor";
@@ -44,6 +44,7 @@ export function Studio() {
   const [project, setProject] = useState<ProjectRecord | null>(null);
   const [generations, setGenerations] = useState<GenerationRecord[]>([]);
   const [dragLines, setDragLines] = useState<number | null>(null);
+  const [mood, setMood] = useState<"generar" | "contexto">("generar");
   const [saveLabel, setSaveLabel] = useState("Guardado");
   const [error, setError] = useState<string | null>(null);
   const [contextOpen, setContextOpen] = useState(false);
@@ -125,7 +126,7 @@ export function Studio() {
         discarded,
       };
       const write = (lines: number) => writeSentences({ ...base, lines });
-      const sentences = write(dragLines ?? PREVIEW_LINES);
+      const sentences = write(MAX_LINES);
       return { draft, write, sentences, preview: joinSentences(sentences) };
     } catch {
       return null;
@@ -328,10 +329,10 @@ export function Studio() {
           </button>
         </header>
         <div className="mx-auto w-full max-w-[44rem] px-3 py-8 sm:px-5">
-          <ul className="mb-6 space-y-1 pl-10 text-xs text-white/40">
-            <li>Arrastrá sobre los renglones vacíos para generar después del cursor. Tab genera un tramo corto.</li>
-            <li>Seleccioná texto generado para borrarlo. Lo próximo retoma la idea con otras palabras.</li>
-            <li>Doble clic en una palabra la conecta al cursor. Las manijas la estiran.</li>
+          <ul className="mb-4 space-y-1 pl-10 text-xs text-white/40">
+            <li>Generar: arrastrá el texto gris, o los renglones de abajo, hasta la oración que quieras. Tab acepta dos.</li>
+            <li>Arrastrar sobre texto generado lo borra al paso. El punto azul no sigue al clic: se queda donde generaste.</li>
+            <li>Contexto: doble clic marca una palabra y esconde la propuesta. Otro clic elige, el siguiente marca.</li>
           </ul>
           <NarrativeEditor
             key={project.id}
@@ -345,6 +346,7 @@ export function Studio() {
             onDragLines={setDragLines}
             onGenerate={onGenerate}
             onDiscard={onDiscard}
+            onMood={setMood}
           />
         </div>
       </section>
@@ -359,6 +361,7 @@ export function Studio() {
           inspector={
             <Inspector
               started={scene.draft.recent !== null}
+              crafting={mood === "contexto"}
               dragging={dragLines !== null}
               lines={dragLines ?? PREVIEW_LINES}
               sentences={scene.sentences}

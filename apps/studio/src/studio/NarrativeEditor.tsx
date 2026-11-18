@@ -1,18 +1,20 @@
 "use client";
 
 import { useEditor, EditorContent, type JSONContent } from "@tiptap/react";
-import { Selection, TextSelection } from "@tiptap/pm/state";
+import { TextSelection } from "@tiptap/pm/state";
 import type { EditorView } from "@tiptap/pm/view";
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import {
   contentOrEmpty,
-  generatedIdsBetween,
-  isFullyGenerated,
+  endOfBlock,
+  eraseGenerated,
+  placeGenerated,
   readReferences,
   referenceConnected,
   snapToWord,
-  wordAt,
+  tokenAt,
 } from "@/narrative/document";
+import { emotionOf } from "@/narrative/emotion";
 import { createNarrativeExtensions, ghostPreviewKey } from "@/narrative/extensions";
 import { REFERENCE_INTENTS, type ReferenceIntent } from "@/narrative/types";
 import { contextWeights } from "@/narrative/weights";
@@ -24,9 +26,21 @@ export type GeneratedBlock = { text: string; blockId: string; generationId: stri
 export type Discarded = { text: string; ids: { blockId: string; generationId: string }[] };
 
 type Point = { x: number; y: number; h: number };
+type Mood = "generar" | "contexto";
+
 type Layout = {
   caret: Point | null;
-  blocks: { key: number; top: number; height: number; weight: number; referenced: boolean; after: boolean }[];
+  blocks: {
+    key: number;
+    pos: number;
+    top: number;
+    height: number;
+    weight: number;
+    referenced: boolean;
+    after: boolean;
+    color: string;
+    emotion: string;
+  }[];
   references: { id: string; intent: ReferenceIntent; connected: boolean; start: Point; end: Point }[];
 };
 
@@ -43,6 +57,7 @@ export function NarrativeEditor({
   onDragLines,
   onGenerate,
   onDiscard,
+  onMood,
 }: {
   projectId: string;
   initial: JSONContent;
@@ -54,22 +69,42 @@ export function NarrativeEditor({
   onDragLines: (lines: number | null) => void;
   onGenerate: (lines: number) => GeneratedBlock | null;
   onDiscard: (discarded: Discarded) => void;
+  onMood?: (mood: "generar" | "contexto") => void;
 }) {
-  const callbacks = useRef({ onChange, onCursor, onDragLines, onGenerate, onDiscard });
-  callbacks.current = { onChange, onCursor, onDragLines, onGenerate, onDiscard };
+  const callbacks = useRef({ onChange, onCursor, onDragLines, onGenerate, onDiscard, onMood });
+  callbacks.current = { onChange, onCursor, onDragLines, onGenerate, onDiscard, onMood };
   const cursorRef = useRef(initialCursor);
   const atEndRef = useRef(placeAtEnd);
   cursorRef.current = initialCursor;
   atEndRef.current = placeAtEnd;
   const placed = useRef(false);
-  /** El cursor de antes del primer clic: un doble clic no mueve el punto de inserción. */
-  const press = useRef<{ detail: number; cursor: number; live: boolean } | null>(null);
-  const ghost = useRef<{ text: string; hidden: boolean } | null>(null);
+  /**
+   * El punto de inserción no sigue al clic. Se queda donde se generó por última vez
+   * y solo se mueve al generar, al borrar o al elegir una barra.
+   */
+  const insertion = useRef<number | null>(initialCursor);
+  const moving = useRef(false);
+  const moodRef = useRef<Mood>("generar");
+  const gesture = useRef<{ x: number; y: number; pos: number; moved: boolean } | null>(null);
+  const armed = useRef<{ from: number; to: number } | null>(null);
+  const draftId = useRef<string | null>(null);
+  const pendingErase = useRef<{ text: string; ids: Discarded["ids"] } | null>(null);
+  const acceptRef = useRef<number | null>(null);
+  const ghostDrag = useRef(false);
+  const ghost = useRef<{ text: string; hidden: boolean; accept: number } | null>(null);
+  const [mood, setMoodState] = useState<Mood>("generar");
   const wrapper = useRef<HTMLDivElement>(null);
   const runway = useRef<HTMLDivElement>(null);
   const resizing = useRef<{ id: string; side: "start" | "end" } | null>(null);
   const [layout, setLayout] = useState<Layout>(EMPTY_LAYOUT);
   const [dragLines, setDragLines] = useState<number | null>(null);
+
+  function setMood(next: Mood) {
+    moodRef.current = next;
+    setMoodState(next);
+    if (next === "generar") draftId.current = null;
+    callbacks.current.onMood?.(next);
+  }
   const [extensions] = useState(createNarrativeExtensions);
   const [content] = useState(() => contentOrEmpty(initial));
 
@@ -86,32 +121,30 @@ export function NarrativeEditor({
         },
         handleDOMEvents: {
           mousedown: (view, event) => {
-            setGhostHidden(view, true);
-            if (event.detail <= 1 || !press.current) {
-              press.current = { detail: 1, cursor: view.state.selection.from, live: true };
-            } else {
-              press.current = { ...press.current, detail: event.detail, live: true };
+            if (ghostDrag.current) return true;
+            const target = eventTarget(event);
+            if (target?.closest(".ghost-sentence, .reference-handle, button")) return true;
+            event.preventDefault();
+            view.focus();
+            const hit = view.posAtCoords({ left: event.clientX, top: event.clientY });
+            if (!hit) return true;
+            if (event.detail >= 2) {
+              enterContext(view, hit.pos);
+              return true;
             }
-            return false;
+            gesture.current = { x: event.clientX, y: event.clientY, pos: hit.pos, moved: false };
+            return true;
           },
         },
-        handleDoubleClick: (view, pos) => {
-          const word = wordAt(view.state.doc, pos);
-          if (!word) return false;
-          const taken = readReferences(view.state.doc).some(
-            (reference) => reference.anchorPos === null && reference.from < word.to && reference.to > word.from,
-          );
-          if (taken) return false;
-          const mark = view.state.schema.marks.reference.create({ id: crypto.randomUUID(), intent: "hecho" });
-          const tr = view.state.tr.addMark(word.from, word.to, mark);
-          const back = press.current?.cursor ?? view.state.selection.from;
-          tr.setSelection(Selection.near(tr.doc.resolve(Math.min(back, tr.doc.content.size))));
-          view.dispatch(tr);
-          return true;
-        },
+        handleDoubleClick: () => true,
         handleKeyDown: (view, event) => {
-          if (event.key !== "Tab" || event.shiftKey || !view.state.selection.empty) return false;
+          if (event.key === "Escape") {
+            setMood("generar");
+            return true;
+          }
+          if (event.key !== "Tab" || event.shiftKey) return false;
           event.preventDefault();
+          if (moodRef.current === "contexto") return true;
           generate(view, PREVIEW_LINES);
           return true;
         },
@@ -120,83 +153,152 @@ export function NarrativeEditor({
         callbacks.current.onChange(current.getJSON());
       },
       onSelectionUpdate: ({ editor: current }) => {
-        callbacks.current.onCursor(current.state.selection.from);
+        const at = insertion.current;
+        if (at == null || moving.current) return;
+        const selection = current.state.selection;
+        if (selection.empty && selection.from === at) return;
+        moving.current = true;
+        const safe = Math.max(0, Math.min(at, current.state.doc.content.size));
+        current.commands.setTextSelection(safe);
+        moving.current = false;
       },
     },
     [projectId, extensions, content],
   );
 
-  /** Mientras el mouse está apretado la propuesta no se dibuja: si no, empuja el texto que se está seleccionando. */
-  function setGhostHidden(view: EditorView, hidden: boolean) {
-    const storage = ghost.current;
-    if (!storage || storage.hidden === hidden) return;
-    storage.hidden = hidden;
-    view.dispatch(view.state.tr.setMeta(ghostPreviewKey, hidden));
-  }
-
   function generate(view: EditorView, lines: number) {
+    if (moodRef.current === "contexto") return;
     const block = callbacks.current.onGenerate(lines);
     if (!block) return;
-    insertGenerated(view, block);
+    const at = insertion.current ?? view.state.selection.from;
+    const placed = placeGenerated(view.state.doc, at, block.text, block.blockId, block.generationId);
+    applyDoc(view, placed.doc, placed.cursor);
     view.focus();
+  }
+
+  function applyDoc(view: EditorView, doc: EditorView["state"]["doc"], cursor: number) {
+    const tr = view.state.tr.replaceWith(0, view.state.doc.content.size, doc.content);
+    const safe = Math.max(0, Math.min(cursor, tr.doc.content.size));
+    moving.current = true;
+    tr.setSelection(TextSelection.create(tr.doc, safe));
+    view.dispatch(tr);
+    moving.current = false;
+    insertion.current = view.state.selection.from;
+    callbacks.current.onCursor(insertion.current);
+  }
+
+  function enterContext(view: EditorView, pos: number) {
+    setMood("contexto");
+    const token = tokenAt(view.state.doc, pos);
+    armed.current = token;
+    if (token) paintReference(view, crypto.randomUUID(), token.from, token.to);
+  }
+
+  function armContext(view: EditorView, pos: number) {
+    const token = tokenAt(view.state.doc, pos);
+    if (!token) return;
+    const previous = armed.current;
+    const same = previous !== null && token.from < previous.to && token.to > previous.from;
+    armed.current = token;
+    if (same) paintReference(view, crypto.randomUUID(), token.from, token.to);
+  }
+
+  function paintReference(view: EditorView, id: string, from: number, to: number) {
+    const { state } = view;
+    const current = readReferences(state.doc).find((item) => item.id === id);
+    const mark = state.schema.marks.reference.create({ id, intent: current?.intent ?? "hecho" });
+    const tr = state.tr;
+    if (current) tr.removeMark(current.from, current.to, mark);
+    tr.addMark(from, to, mark);
+    moving.current = true;
+    const at = insertion.current ?? state.selection.from;
+    tr.setSelection(TextSelection.create(tr.doc, Math.max(0, Math.min(at, tr.doc.content.size))));
+    view.dispatch(tr);
+    moving.current = false;
+  }
+
+  /** Borra lo generado entre el inicio del arrastre y el puntero, en el documento de ahora. */
+  function sweep(view: EditorView, anchor: number, pointer: number): number {
+    const result = eraseGenerated(view.state.doc, anchor, pointer);
+    if (!result) return anchor;
+    const pending = pendingErase.current ?? { text: "", ids: [] };
+    pending.text = `${pending.text} ${result.text}`.trim();
+    pending.ids = [...pending.ids, ...result.ids];
+    pendingErase.current = pending;
+    applyDoc(view, result.doc, result.map(insertion.current ?? anchor));
+    return result.map(Math.min(anchor, pointer));
   }
 
   useEffect(() => {
     if (!editor || placed.current) return;
     placed.current = true;
     const stored = cursorRef.current;
+    moving.current = true;
     if (typeof stored === "number") {
       const max = editor.state.doc.content.size;
       editor.commands.setTextSelection(Math.max(0, Math.min(stored, max)));
     } else if (atEndRef.current) {
       editor.commands.focus("end");
     }
-    callbacks.current.onCursor(editor.state.selection.from);
+    moving.current = false;
+    insertion.current = editor.state.selection.from;
+    callbacks.current.onCursor(insertion.current);
+    callbacks.current.onMood?.("generar");
   }, [editor]);
 
   useEffect(() => {
     if (!editor) return;
-    const storage = (editor.storage as { ghostPreview?: { text: string; hidden: boolean } }).ghostPreview;
+    const storage = (editor.storage as { ghostPreview?: { text: string; hidden: boolean; accept: number } }).ghostPreview;
     ghost.current = storage ?? null;
-    if (!storage || storage.text === preview) return;
+    if (!storage) return;
+    const hidden = mood === "contexto";
+    const accept = dragLines ?? 0;
+    if (storage.text === preview && storage.hidden === hidden && storage.accept === accept) return;
     storage.text = preview;
+    storage.hidden = hidden;
+    storage.accept = accept;
     editor.view.dispatch(editor.state.tr.setMeta(ghostPreviewKey, preview));
-  }, [editor, preview]);
+  }, [editor, preview, dragLines, mood]);
 
   useEffect(() => {
     if (!editor) return;
-    const onUp = () => {
-      const pressed = press.current;
-      if (!pressed?.live) return;
-      pressed.live = false;
-      window.setTimeout(() => {
-        if (editor.isDestroyed) return;
-        if (pressed.detail === 1) discardSelection(editor.view);
-        setGhostHidden(editor.view, false);
-      }, 0);
+    const onMove = (event: PointerEvent) => {
+      const active = gesture.current;
+      if (!active) return;
+      if (Math.hypot(event.clientX - active.x, event.clientY - active.y) < 5) return;
+      active.moved = true;
+      const hit = editor.view.posAtCoords({ left: event.clientX, top: event.clientY });
+      if (!hit) return;
+      if (moodRef.current === "generar") {
+        active.pos = sweep(editor.view, active.pos, hit.pos);
+        return;
+      }
+      const start = tokenAt(editor.view.state.doc, active.pos);
+      const end = tokenAt(editor.view.state.doc, hit.pos);
+      if (!start || !end) return;
+      draftId.current ??= crypto.randomUUID();
+      paintReference(editor.view, draftId.current, Math.min(start.from, end.from), Math.max(start.to, end.to));
     };
-    document.addEventListener("mouseup", onUp);
-    return () => document.removeEventListener("mouseup", onUp);
+    const onUp = () => {
+      const active = gesture.current;
+      gesture.current = null;
+      if (!active || editor.isDestroyed) return;
+      const pending = pendingErase.current;
+      pendingErase.current = null;
+      if (pending && pending.text) callbacks.current.onDiscard(pending);
+      if (active.moved) {
+        draftId.current = null;
+        return;
+      }
+      if (moodRef.current === "contexto") armContext(editor.view, active.pos);
+    };
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+    return () => {
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+    };
   }, [editor]);
-
-  function discardSelection(view: EditorView) {
-    const { selection, doc } = view.state;
-    if (selection.empty || !isFullyGenerated(doc, selection.from, selection.to)) return;
-    callbacks.current.onDiscard({
-      text: doc.textBetween(selection.from, selection.to, " "),
-      ids: generatedIdsBetween(doc, selection.from, selection.to),
-    });
-    const tr = view.state.tr.delete(selection.from, selection.to);
-    const at = tr.mapping.map(selection.from);
-    const $at = tr.doc.resolve(at);
-    if ($at.depth === 1 && $at.parent.content.size === 0 && tr.doc.childCount > 1) {
-      tr.delete($at.before(), $at.after());
-    }
-    const safe = Math.max(0, Math.min(tr.mapping.map(selection.from, -1), tr.doc.content.size));
-    tr.setSelection(Selection.near(tr.doc.resolve(safe), -1));
-    view.dispatch(tr);
-    view.focus();
-  }
 
   useEffect(() => {
     if (!editor) return;
@@ -224,33 +326,45 @@ export function NarrativeEditor({
     return Math.max(1, Math.min(MAX_LINES, Math.ceil((clientY - box.top) / LINE_HEIGHT)));
   }
 
-  function onRunwayDown(event: ReactPointerEvent<HTMLDivElement>) {
-    if (!editor) return;
-    event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    const lines = linesAt(event.clientY);
+  function setAccept(lines: number | null) {
+    acceptRef.current = lines;
     setDragLines(lines);
     callbacks.current.onDragLines(lines);
+  }
+
+  function onRunwayDown(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!editor || moodRef.current === "contexto") return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setAccept(linesAt(event.clientY));
   }
 
   function onRunwayMove(event: ReactPointerEvent<HTMLDivElement>) {
-    if (dragLines === null) return;
+    if (acceptRef.current === null) return;
     const lines = linesAt(event.clientY);
-    if (lines === dragLines) return;
-    setDragLines(lines);
-    callbacks.current.onDragLines(lines);
+    if (lines === acceptRef.current) return;
+    setAccept(lines);
   }
 
   function onRunwayUp() {
-    const lines = dragLines;
-    setDragLines(null);
-    callbacks.current.onDragLines(null);
+    const lines = acceptRef.current;
+    setAccept(null);
     if (editor && lines) generate(editor.view, lines);
   }
 
   function onRunwayCancel() {
-    setDragLines(null);
-    callbacks.current.onDragLines(null);
+    setAccept(null);
+  }
+
+  function placeAt(pos: number) {
+    if (!editor) return;
+    const edge = endOfBlock(editor.state.doc, pos);
+    moving.current = true;
+    editor.commands.setTextSelection(Math.max(0, Math.min(edge, editor.state.doc.content.size)));
+    moving.current = false;
+    insertion.current = editor.state.selection.from;
+    callbacks.current.onCursor(insertion.current);
+    setMood("generar");
   }
 
   function startResize(event: ReactPointerEvent<HTMLElement>, id: string, side: "start" | "end") {
@@ -271,9 +385,65 @@ export function NarrativeEditor({
     resizing.current = null;
   }
 
+  useEffect(() => {
+    const root = wrapper.current;
+    if (!root || !editor) return;
+    let dragging = false;
+    const indexAt = (event: PointerEvent) => {
+      const element = document.elementFromPoint(event.clientX, event.clientY);
+      const sentence = element?.closest(".ghost-sentence");
+      if (!(sentence instanceof HTMLElement)) return null;
+      return Number(sentence.dataset.ghostIndex ?? 0) + 1;
+    };
+    const onDown = (event: PointerEvent) => {
+      const target = eventTarget(event);
+      if (!target?.closest(".ghost-sentence") || moodRef.current === "contexto") return;
+      event.preventDefault();
+      event.stopPropagation();
+      ghostDrag.current = true;
+      dragging = true;
+      const lines = indexAt(event);
+      if (lines) setAccept(lines);
+    };
+    const onMove = (event: PointerEvent) => {
+      if (!dragging) return;
+      const lines = indexAt(event);
+      if (lines) setAccept(lines);
+    };
+    const onUp = () => {
+      if (!dragging) return;
+      dragging = false;
+      ghostDrag.current = false;
+      const lines = acceptRef.current;
+      setAccept(null);
+      if (lines) generate(editor.view, lines);
+    };
+    root.addEventListener("pointerdown", onDown, true);
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+    return () => {
+      root.removeEventListener("pointerdown", onDown, true);
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+    };
+  }, [editor]);
+
   return (
-    <div ref={wrapper} className="relative pl-10">
-      <Gutter blocks={layout.blocks} />
+    <div ref={wrapper} className="relative pl-10" data-mood={mood}>
+      <div className="mb-3 flex items-center gap-2">
+        <button type="button" aria-pressed={mood === "generar"} className="mood-button" onClick={() => setMood("generar")}>
+          Generar
+        </button>
+        <button type="button" aria-pressed={mood === "contexto"} className="mood-button" onClick={() => setMood("contexto")}>
+          Contexto
+        </button>
+        <span className="text-[11px] text-white/40">
+          {mood === "generar"
+            ? "Arrastrá el texto gris para aceptar hasta ahí. Arrastrar texto generado lo borra."
+            : "Sin propuesta. Un clic elige el lugar, el siguiente lo marca. Esc vuelve a generar."}
+        </span>
+      </div>
+      <Gutter blocks={layout.blocks} onPlace={placeAt} />
       <Connectors layout={layout} />
       <EditorContent editor={editor} />
       {layout.references.map((reference) => (
@@ -306,38 +476,44 @@ export function NarrativeEditor({
         ))}
         <p className="runway-label">
           {dragLines === null
-            ? "Arrastrá sobre estos renglones para generar después del cursor."
-            : `${dragLines} ${dragLines === 1 ? "renglón" : "renglones"} · soltá para generar`}
+            ? "O arrastrá acá: cada renglón es una oración de la propuesta."
+            : `${dragLines} ${dragLines === 1 ? "oración" : "oraciones"} · soltá para generar`}
         </p>
       </div>
     </div>
   );
 }
 
-function Gutter({ blocks }: { blocks: Layout["blocks"] }) {
+function Gutter({ blocks, onPlace }: { blocks: Layout["blocks"]; onPlace: (pos: number) => void }) {
   return (
-    <div aria-hidden className="pointer-events-none absolute top-0 left-0 w-8">
+    <div className="absolute top-0 left-0 w-8">
       {blocks.map((block) => {
-        const color = block.referenced ? "#9eb7ff" : "#ff8a5a";
-        const alpha = block.after ? 0 : Math.max(0.12, block.weight / 10);
+        const count = block.after ? 1 : Math.max(block.weight, 1);
         return (
-          <div
+          <button
             key={block.key}
-            className="absolute right-1 flex items-start gap-1"
+            type="button"
+            className="emotion-stack"
             style={{ top: block.top, height: block.height }}
-            title={block.after ? "Después del cursor: no se usa" : `Peso ${block.weight} de 10`}
+            title={
+              block.after
+                ? "Después del punto de inserción: no se usa"
+                : `${block.emotion} · peso ${block.weight}. Clic para continuar desde este párrafo.`
+            }
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => onPlace(block.pos)}
           >
-            <span className="w-4 pt-[3px] text-right text-[10px] tabular-nums" style={{ color, opacity: block.after ? 0.25 : alpha }}>
-              {block.after ? "·" : block.weight}
-            </span>
-            <span
-              className="h-full w-[3px] rounded-full"
-              style={{
-                background: block.after ? "rgba(255,255,255,0.08)" : color,
-                opacity: block.after ? 1 : alpha,
-              }}
-            />
-          </div>
+            {Array.from({ length: count }, (_, index) => (
+              <i
+                key={index}
+                className="emotion-tick"
+                style={{
+                  background: block.after ? "rgba(255,255,255,0.22)" : block.color,
+                  opacity: block.after ? 0.35 : 0.35 + ((index + 1) / count) * 0.65,
+                }}
+              />
+            ))}
+          </button>
         );
       })}
     </div>
@@ -444,18 +620,22 @@ function measure(view: EditorView, wrapper: HTMLElement): Layout {
       return null;
     }
   };
-  const blocks = contextWeights(doc, cursor).flatMap((weight) => {
+    const blocks = contextWeights(doc, cursor).flatMap((weight) => {
     const dom = view.nodeDOM(weight.pos);
     if (!(dom instanceof HTMLElement)) return [];
     const rect = dom.getBoundingClientRect();
+    const emotion = emotionOf(doc.nodeAt(weight.pos)?.textContent ?? "");
     return [
       {
         key: weight.pos,
+        pos: weight.pos,
         top: rect.top - box.top,
         height: rect.height,
         weight: weight.weight,
         referenced: weight.referenced,
         after: weight.after,
+        color: weight.referenced ? "#9eb7ff" : emotion.color,
+        emotion: weight.referenced ? "Referencia" : emotion.name,
       },
     ];
   });
@@ -477,32 +657,11 @@ function measure(view: EditorView, wrapper: HTMLElement): Layout {
   return { caret: point(cursor, -1), blocks, references };
 }
 
-function insertGenerated(view: EditorView, block: GeneratedBlock) {
-  const { state } = view;
-  const schema = state.schema;
-  const mark = schema.marks.generated.create({ id: block.blockId, generationId: block.generationId });
-  const pos = state.selection.from;
-  const $pos = state.doc.resolve(pos);
-  const tr = state.tr;
-  let end: number;
-  if ($pos.parent.isTextblock && $pos.parent.content.size === 0) {
-    tr.insert(pos, schema.text(block.text, [mark]));
-    end = pos + block.text.length;
-  } else if ($pos.parent.isTextblock && $pos.parentOffset === $pos.parent.content.size && $pos.depth === 1) {
-    const after = $pos.after();
-    tr.insert(after, schema.nodes.paragraph.create(null, schema.text(block.text, [mark])));
-    end = after + 1 + block.text.length;
-  } else {
-    const offset = $pos.parentOffset;
-    const size = $pos.parent.content.size;
-    const previous = offset > 0 ? $pos.parent.textBetween(offset - 1, offset, undefined, " ") : " ";
-    const next = offset < size ? $pos.parent.textBetween(offset, offset + 1, undefined, " ") : " ";
-    const text = `${/\s/.test(previous) ? "" : " "}${block.text}${/\s/.test(next) ? "" : " "}`;
-    tr.insert(pos, schema.text(text, [mark]));
-    end = pos + text.length;
-  }
-  tr.setSelection(TextSelection.create(tr.doc, end));
-  view.dispatch(tr.scrollIntoView());
+function eventTarget(event: Event): Element | null {
+  const target = event.target;
+  if (target instanceof Element) return target;
+  if (target instanceof Node) return target.parentElement;
+  return null;
 }
 
 function resizeReference(view: EditorView, id: string, side: "start" | "end", pos: number) {

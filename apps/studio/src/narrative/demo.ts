@@ -4,10 +4,10 @@ import { createProjectRecord } from "./repository";
 import { describeStyle, mixFromWeights } from "./style";
 import type { ContextDocument, ContextKind, ProjectRecord } from "./types";
 
-export const DEMO_CONTINUED_ID = "demo-azotea-2";
-export const DEMO_BLANK_ID = "demo-desde-cero-2";
-/** Ejemplos de la versión anterior: la referencia tenía un ancla fija. Se reemplazan. */
-export const RETIRED_DEMO_IDS = ["demo-azotea", "demo-desde-cero"];
+export const DEMO_CONTINUED_ID = "demo-azotea-3";
+export const DEMO_BLANK_ID = "demo-desde-cero-3";
+/** Ejemplos anteriores, con el texto intercalado o el ancla fija. Se reemplazan. */
+export const RETIRED_DEMO_IDS = ["demo-azotea", "demo-desde-cero", "demo-azotea-2", "demo-desde-cero-2"];
 
 const FORMAT = "Prosa corrida. Un bloque por escena, no un capítulo entero.";
 
