@@ -1,5 +1,44 @@
-import { Mark, Node, mergeAttributes } from "@tiptap/core";
+import { Extension, Mark, Node, mergeAttributes } from "@tiptap/core";
+import { Plugin, PluginKey } from "@tiptap/pm/state";
+import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import StarterKit from "@tiptap/starter-kit";
+
+export const ghostPreviewKey = new PluginKey("ghostPreview");
+
+export function createGhostPreview() {
+  return Extension.create({
+    name: "ghostPreview",
+    addStorage() {
+      return { text: "" };
+    },
+    addProseMirrorPlugins() {
+      const storage = this.storage as { text: string };
+      return [
+        new Plugin({
+          key: ghostPreviewKey,
+          props: {
+            decorations(state) {
+              const text = storage.text.trim();
+              if (!text || !state.selection.empty) return null;
+              const widget = Decoration.widget(
+                state.selection.from,
+                () => {
+                  const span = document.createElement("span");
+                  span.className = "ghost-preview";
+                  span.title = "Propuesta mock, sin modelo";
+                  span.textContent = text;
+                  return span;
+                },
+                { side: 1, ignoreSelection: true, key: text },
+              );
+              return DecorationSet.create(state.doc, [widget]);
+            },
+          },
+        }),
+      ];
+    },
+  });
+}
 
 export const GeneratedMark = Mark.create({
   name: "generated",
@@ -99,5 +138,6 @@ export function createNarrativeExtensions() {
     GeneratedMark,
     ReferenceMark,
     ReferenceAnchor,
+    createGhostPreview(),
   ];
 }

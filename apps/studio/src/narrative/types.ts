@@ -29,14 +29,23 @@ export type ContextDocument = {
   protected: boolean;
 };
 
+export type StyleWeight = {
+  id: string;
+  name: string;
+  weight: number;
+};
+
 export type ProjectRecord = {
   version: typeof PROJECT_VERSION;
   id: string;
   name: string;
   format: string;
   style: string;
+  styleMix: StyleWeight[];
+  influence: string[];
   document: JSONContent;
   contextDocs: ContextDocument[];
+  cursor: number | null;
   createdAt: string;
   updatedAt: string;
 };

@@ -54,8 +54,8 @@ test("una referencia sigue unida a su ancla después de insertar un bloque delan
   assert.equal(typeof reference?.anchorPos, "number");
   assert.ok((reference?.anchorPos ?? 0) > sourceTo);
   const anchor = findAnchor(doc, "ref-1");
-  assert.equal(anchor?.attrs.referenceId, "ref-1");
-  assert.equal(anchor?.attrs.id, "anc-1");
+  assert.equal(anchor.referenceId, "ref-1");
+  assert.equal(anchor.id, "anc-1");
 });
 
 test("el ancla cuenta solo si comparte el bloque del cursor", () => {
@@ -73,9 +73,10 @@ test("el ancla cuenta solo si comparte el bloque del cursor", () => {
 });
 
 function findAnchor(doc: ReturnType<typeof docWithParagraph>, referenceId: string) {
-  let found: { attrs: { referenceId?: string; id?: string } } | null = null;
+  let foundId: string | null = null;
   doc.descendants((node) => {
-    if (node.type.name === "referenceAnchor" && node.attrs.referenceId === referenceId) found = node;
+    if (node.type.name !== "referenceAnchor" || node.attrs.referenceId !== referenceId) return;
+    foundId = String(node.attrs.id ?? "");
   });
-  return found;
+  return { referenceId: foundId === null ? null : referenceId, id: foundId };
 }
