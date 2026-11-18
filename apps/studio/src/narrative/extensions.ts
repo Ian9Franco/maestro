@@ -2,36 +2,57 @@ import { Extension, Mark, Node, mergeAttributes } from "@tiptap/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import StarterKit from "@tiptap/starter-kit";
+import { splitSentences } from "./writer";
 
 export const ghostPreviewKey = new PluginKey("ghostPreview");
+
+type GhostStorage = { text: string; hidden: boolean; accept: number };
 
 export function createGhostPreview() {
   return Extension.create({
     name: "ghostPreview",
     addStorage() {
-      return { text: "", hidden: false };
+      return { text: "", hidden: false, accept: 0 } satisfies GhostStorage;
     },
     addProseMirrorPlugins() {
-      const storage = this.storage as { text: string; hidden: boolean };
+      const storage = this.storage as GhostStorage;
       return [
         new Plugin({
           key: ghostPreviewKey,
           props: {
             decorations(state) {
+              const caret = Decoration.widget(
+                state.selection.from,
+                () => {
+                  const bar = document.createElement("span");
+                  bar.className = "insertion-caret";
+                  bar.setAttribute("aria-hidden", "true");
+                  return bar;
+                },
+                { side: -1, ignoreSelection: true, key: "insertion-caret" },
+              );
               const text = storage.text.trim();
-              if (!text || storage.hidden || !state.selection.empty) return null;
+              if (!text || storage.hidden || !state.selection.empty) return DecorationSet.create(state.doc, [caret]);
+              const sentences = splitSentences(text);
               const widget = Decoration.widget(
                 state.selection.from,
                 () => {
                   const span = document.createElement("span");
                   span.className = "ghost-preview";
-                  span.title = "Propuesta mock, sin modelo";
-                  span.textContent = text;
+                  span.title = "Arrastrá hasta donde quieras aceptar";
+                  sentences.forEach((sentence, index) => {
+                    const line = document.createElement("span");
+                    line.className = "ghost-sentence";
+                    line.dataset.ghostIndex = String(index);
+                    if (storage.accept > index) line.dataset.on = "";
+                    line.textContent = `${index === 0 ? "" : " "}${sentence}`;
+                    span.append(line);
+                  });
                   return span;
                 },
-                { side: 1, ignoreSelection: true, key: text, marks: [] },
+                { side: 1, ignoreSelection: true, key: `${text}:${storage.accept}`, marks: [] },
               );
-              return DecorationSet.create(state.doc, [widget]);
+              return DecorationSet.create(state.doc, [caret, widget]);
             },
           },
         }),

@@ -1,5 +1,6 @@
 "use client";
 
+import { EMOTIONS } from "@/narrative/emotion";
 import { INSPIRATIONS, type InspirationId } from "@/narrative/style";
 import type { GenerationRecord, PromptDraft, StyleWeight } from "@/narrative/types";
 import { estimateTokens, WORDS_PER_LINE, type WrittenSentence } from "@/narrative/writer";
@@ -8,6 +9,7 @@ const heading = "text-[11px] tracking-wide text-white/45 uppercase";
 
 export function Inspector({
   started,
+  crafting,
   dragging,
   lines,
   sentences,
@@ -20,6 +22,7 @@ export function Inspector({
   onInspiration,
 }: {
   started: boolean;
+  crafting: boolean;
   dragging: boolean;
   lines: number;
   sentences: WrittenSentence[];
@@ -35,8 +38,10 @@ export function Inspector({
   const discarded = history.filter((item) => item.status === "discarded").length;
   return (
     <div className="space-y-4">
-      <p className="text-xs text-white/50">{started ? "Seguiría desde el cursor." : "Empezaría de cero."}</p>
-      <section className="rounded-lg border border-white/10 p-3" aria-live="polite">
+      <p className="text-xs text-white/50">
+        {crafting ? "Modo contexto: no hay propuesta. Estás eligiendo qué recordar." : started ? "Seguiría desde el cursor." : "Empezaría de cero."}
+      </p>
+      {crafting ? null : <section className="rounded-lg border border-white/10 p-3" aria-live="polite">
         <div className="flex items-baseline justify-between gap-2">
           <h2 className={heading}>Propuesta mock</h2>
           <span className="text-[11px] tabular-nums text-white/40">
@@ -60,7 +65,7 @@ export function Inspector({
         <p className="mt-2 text-[11px] text-white/35">
           Sin modelo. Cambia con el cursor, las fichas, las referencias y la inspiración.
         </p>
-      </section>
+      </section>}
 
       <section>
         <h2 className={heading}>Historial</h2>
@@ -99,6 +104,18 @@ export function Inspector({
           </ul>
         </section>
       ) : null}
+
+      <section>
+        <h2 className={heading}>Emoción de la columna</h2>
+        <ul className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
+          {EMOTIONS.map((emotion) => (
+            <li key={emotion.id} className="flex items-center gap-1 text-[11px] text-white/60">
+              <i className="inline-block h-1.5 w-3 rounded-full" style={{ background: emotion.color }} />
+              {emotion.name}
+            </li>
+          ))}
+        </ul>
+      </section>
 
       <section>
         <h2 className={heading}>Inspiración</h2>

@@ -6,8 +6,8 @@ Esta base reemplaza la mesa anterior. El manuscrito es un documento de ProseMirr
 
 Todo el control generativo pasa por el cursor:
 
-- Arrastrar sobre los renglones vacíos genera después del cursor, una oración por renglón. Tab genera un tramo corto.
-- Seleccionar con el mouse texto generado lo borra. El texto escrito a mano no se borra así. Lo siguiente retoma la idea con otras palabras.
+- Hay dos modos. En generar, arrastrar el texto gris acepta la propuesta hasta esa oración, y arrastrar sobre texto generado lo borra. El punto azul se queda donde se generó por última vez: el clic no lo mueve.
+- En contexto, el doble clic marca una palabra y esconde la propuesta. Las marcas se unen con una línea al punto de inserción. El texto nuevo entra siempre en su propio párrafo, nunca en medio de una palabra.
 - Doble clic en una palabra la conecta al punto de inserción, esté donde esté. Las manijas la estiran hacia atrás o hacia adelante.
 - La columna de la izquierda muestra cuánto pesa cada párrafo en lo que sigue: más lo reciente, nada lo que está después del cursor, y en azul lo que trae una referencia.
 

@@ -4,12 +4,17 @@ import { EditorState } from "@tiptap/pm/state";
 import {
   connectReference,
   docWithParagraph,
+  endOfBlock,
+  eraseGenerated,
   generatedIdsBetween,
   isFullyGenerated,
   markGenerated,
+  placeGenerated,
   snapToWord,
+  tokenAt,
   wordAt,
 } from "./document";
+import { emotionOf } from "./emotion";
 import { contextWeights } from "./weights";
 
 test("doble clic toma la palabra entera y las manijas encajan en palabras", () => {
@@ -21,6 +26,43 @@ test("doble clic toma la palabra entera y las manijas encajan en palabras", () =
   assert.equal(wordAt(doc, 1 + "El reflector".length + 1)?.from, 1 + "El reflector ".length);
   const afterPeriod = doc.content.size - 1;
   assert.equal(doc.textBetween(word!.from, snapToWord(doc, afterPeriod, "end")), "azotea vacía");
+});
+
+test("generar en medio de una palabra no la parte: entra un párrafo nuevo", () => {
+  const doc = docWithParagraph("La lluvia golpeaba los ventanales de Gotham.");
+  const mid = 1 + "La lluvia gol".length;
+  const placed = placeGenerated(doc, mid, "Un ruido metálico interrumpió la azotea.", "blk", "gen");
+  const paragraphs: string[] = [];
+  placed.doc.forEach((node) => paragraphs.push(node.textContent));
+  assert.deepEqual(paragraphs, [
+    "La lluvia golpeaba los ventanales de Gotham.",
+    "Un ruido metálico interrumpió la azotea.",
+  ]);
+  assert.equal(placed.cursor > endOfBlock(doc, mid), true);
+});
+
+test("borrar un arrastre saca solo lo generado", () => {
+  let doc = docWithParagraph("Escrito a mano. Generado por el modelo.");
+  const from = 1 + "Escrito a mano. ".length;
+  doc = markGenerated(doc, from, doc.content.size - 1, "blk", "gen");
+  const erased = eraseGenerated(doc, 1, doc.content.size);
+  assert.ok(erased);
+  assert.match(erased.doc.textContent, /Escrito a mano/);
+  assert.equal(erased.doc.textContent.includes("Generado"), false);
+  assert.equal(erased.ids[0]?.blockId, "blk");
+});
+
+test("el segundo clic distingue palabra, espacio y letra", () => {
+  const doc = docWithParagraph("La lluvia golpeaba.");
+  assert.equal(tokenAt(doc, 1 + "La llu".length)?.kind, "palabra");
+  assert.equal(tokenAt(doc, 1 + "La".length)?.kind, "espacio");
+  assert.equal(tokenAt(doc, doc.content.size - 1)?.kind, "letra");
+});
+
+test("el color de la columna sale de la emoción del párrafo", () => {
+  assert.equal(emotionOf("La lluvia golpeaba los ventanales.").id, "atmosfera");
+  assert.equal(emotionOf("Un golpe seco sonó contra la baranda.").id, "accion");
+  assert.equal(emotionOf("Batman guardó lo que sabía.").id, "introspeccion");
 });
 
 test("seleccionar solo texto generado lo borra; si hay texto propio, no", () => {
