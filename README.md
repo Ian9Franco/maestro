@@ -6,7 +6,7 @@ Esta base reemplaza la mesa anterior. El manuscrito es un documento de ProseMirr
 
 Todo el control generativo pasa por el cursor:
 
-- Hay dos modos. En generar, arrastrar el texto gris acepta la propuesta hasta esa oración, y arrastrar sobre texto generado lo borra. El punto azul se queda donde se generó por última vez: el clic no lo mueve.
+- Un clic mueve el punto de inserción: ahí se escribe a mano, y la generación sigue después de ese párrafo. Clic en el punto abre el modo y las características (tensión, sorpresa, ritmo, distancia); arrastrarlo hacia una de ellas la sube o la baja.
 - En contexto, el doble clic marca una palabra y esconde la propuesta. Las marcas se unen con una línea al punto de inserción. El texto nuevo entra siempre en su propio párrafo, nunca en medio de una palabra.
 - Doble clic en una palabra la conecta al punto de inserción, esté donde esté. Las manijas la estiran hacia atrás o hacia adelante.
 - La columna de la izquierda muestra cuánto pesa cada párrafo en lo que sigue: más lo reciente, nada lo que está después del cursor, y en azul lo que trae una referencia.

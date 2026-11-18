@@ -1,4 +1,5 @@
-import { weightOf, type StyleId } from "./style";
+import { defaultDials, rankedVariants, type NarrativeDials } from "./dials";
+import type { StyleId } from "./style";
 import type { ReferenceIntent, StyleWeight } from "./types";
 
 /**
@@ -148,6 +149,7 @@ export type WriterInput = {
   lines: number;
   names: string[];
   weights: StyleWeight[];
+  dials?: NarrativeDials;
   references: { text: string; intent: ReferenceIntent }[];
   discarded: string[];
 };
@@ -180,7 +182,8 @@ export function writeSentences(input: WriterInput): WrittenSentence[] {
     const variants = beat.variants(names);
     const fresh = variants.filter((variant) => !taken.has(clean(variant.text)) && !discarded.has(clean(variant.text)));
     if (fresh.length === 0) continue;
-    const pick = strongest(fresh, input.weights);
+    const ranked = rankedVariants(fresh, input.weights, input.dials ?? defaultDials());
+    const pick = input.dials && input.dials.surprise >= 60 && ranked.length > 1 ? ranked[1]! : ranked[0]!;
     const recycled = variants.some((variant) => discarded.has(clean(variant.text)));
     taken.add(clean(pick.text));
     out.push({ text: pick.text, beat: beat.id, recycled, reference: false });
@@ -211,14 +214,6 @@ function nextBeat(before: string, names: string[]): number {
   });
   if (last >= 0) return last + 1;
   return before.trim().length > 0 ? OPENING.length : 0;
-}
-
-function strongest(variants: Variant[], weights: StyleWeight[]): Variant {
-  let best = variants[0]!;
-  for (const variant of variants) {
-    if (weightOf(weights, variant.trait) > weightOf(weights, best.trait)) best = variant;
-  }
-  return best;
 }
 
 function clean(text: string): string {

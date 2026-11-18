@@ -1,6 +1,6 @@
 "use client";
 
-import { EMOTIONS } from "@/narrative/emotion";
+import { DIAL_IDS, dialCaption, type NarrativeDials } from "@/narrative/dials";
 import { INSPIRATIONS, type InspirationId } from "@/narrative/style";
 import type { GenerationRecord, PromptDraft, StyleWeight } from "@/narrative/types";
 import { estimateTokens, WORDS_PER_LINE, type WrittenSentence } from "@/narrative/writer";
@@ -17,6 +17,7 @@ export function Inspector({
   prompt,
   history,
   influence,
+  dials,
   styleMix,
   onWeight,
   onInspiration,
@@ -30,6 +31,7 @@ export function Inspector({
   prompt: string;
   history: GenerationRecord[];
   influence: string[];
+  dials: NarrativeDials;
   styleMix: StyleWeight[];
   onWeight: (id: string, weight: number) => void;
   onInspiration: (id: InspirationId) => void;
@@ -106,13 +108,10 @@ export function Inspector({
       ) : null}
 
       <section>
-        <h2 className={heading}>Emoción de la columna</h2>
-        <ul className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
-          {EMOTIONS.map((emotion) => (
-            <li key={emotion.id} className="flex items-center gap-1 text-[11px] text-white/60">
-              <i className="inline-block h-1.5 w-3 rounded-full" style={{ background: emotion.color }} />
-              {emotion.name}
-            </li>
+        <h2 className={heading}>Modo del punto</h2>
+        <ul className="mt-2 space-y-1 text-[12px] text-white/70">
+          {DIAL_IDS.map((id) => (
+            <li key={id}>{dialCaption(dials, id)}</li>
           ))}
         </ul>
       </section>
