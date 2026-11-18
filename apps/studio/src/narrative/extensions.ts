@@ -9,17 +9,17 @@ export function createGhostPreview() {
   return Extension.create({
     name: "ghostPreview",
     addStorage() {
-      return { text: "" };
+      return { text: "", hidden: false };
     },
     addProseMirrorPlugins() {
-      const storage = this.storage as { text: string };
+      const storage = this.storage as { text: string; hidden: boolean };
       return [
         new Plugin({
           key: ghostPreviewKey,
           props: {
             decorations(state) {
               const text = storage.text.trim();
-              if (!text || !state.selection.empty) return null;
+              if (!text || storage.hidden || !state.selection.empty) return null;
               const widget = Decoration.widget(
                 state.selection.from,
                 () => {
@@ -29,7 +29,7 @@ export function createGhostPreview() {
                   span.textContent = text;
                   return span;
                 },
-                { side: 1, ignoreSelection: true, key: text },
+                { side: 1, ignoreSelection: true, key: text, marks: [] },
               );
               return DecorationSet.create(state.doc, [widget]);
             },

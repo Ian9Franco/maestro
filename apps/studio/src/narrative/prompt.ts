@@ -1,5 +1,5 @@
 import type { Node as ProseNode } from "@tiptap/pm/model";
-import { localPassage, readReferences, sameBlock } from "./document";
+import { localPassage, readReferences, referenceConnected } from "./document";
 import type { ContextDocument, PromptDraft, PromptFragment } from "./types";
 
 export const LOCAL_PASSAGE_BUDGET = 2400;
@@ -58,22 +58,21 @@ export function assemblePrompt(
   const references: PromptFragment[] = [];
   for (const reference of readReferences(doc)) {
     const label = `Referencia · ${reference.intent}`;
-    if (reference.anchorPos === null) {
-      excluded.push({ label, text: reference.text, reason: "No tiene ancla en el documento." });
-      continue;
-    }
-    if (!sameBlock(doc, cursor, reference.anchorPos)) {
-      excluded.push({ label, text: reference.text, reason: "El ancla no está en el punto de inserción." });
-      continue;
-    }
     if (reference.text.trim().length === 0) {
       excluded.push({ label, text: "", reason: "La referencia no tiene texto." });
+      continue;
+    }
+    if (!referenceConnected(doc, cursor, reference)) {
+      excluded.push({ label, text: reference.text, reason: "El ancla no está en el punto de inserción." });
       continue;
     }
     references.push({
       label,
       text: reference.text,
-      reason: "Referencia manual anclada al punto de inserción.",
+      reason:
+        reference.anchorPos === null
+          ? "Conectada al punto de inserción, esté donde esté."
+          : "Referencia manual anclada al punto de inserción.",
     });
   }
 

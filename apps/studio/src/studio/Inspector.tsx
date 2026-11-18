@@ -1,37 +1,97 @@
 "use client";
 
 import { INSPIRATIONS, type InspirationId } from "@/narrative/style";
-import type { PromptDraft, StyleWeight } from "@/narrative/types";
+import type { GenerationRecord, PromptDraft, StyleWeight } from "@/narrative/types";
+import { estimateTokens, WORDS_PER_LINE, type WrittenSentence } from "@/narrative/writer";
+
+const heading = "text-[11px] tracking-wide text-white/45 uppercase";
 
 export function Inspector({
   started,
-  preview,
+  dragging,
+  lines,
+  sentences,
   draft,
+  prompt,
+  history,
   influence,
   styleMix,
   onWeight,
   onInspiration,
 }: {
   started: boolean;
-  preview: string;
+  dragging: boolean;
+  lines: number;
+  sentences: WrittenSentence[];
   draft: PromptDraft;
+  prompt: string;
+  history: GenerationRecord[];
   influence: string[];
   styleMix: StyleWeight[];
   onWeight: (id: string, weight: number) => void;
   onInspiration: (id: InspirationId) => void;
 }) {
+  const accepted = history.filter((item) => item.status === "accepted").length;
+  const discarded = history.filter((item) => item.status === "discarded").length;
   return (
     <div className="space-y-4">
       <p className="text-xs text-white/50">{started ? "Seguiría desde el cursor." : "Empezaría de cero."}</p>
-      <section className="rounded-lg border border-white/10 p-3">
-        <h2 className="text-[11px] tracking-wide text-white/45 uppercase">Propuesta mock</h2>
-        <p className="mt-2 text-sm leading-5 text-white/75">{preview}</p>
-        <p className="mt-2 text-[11px] text-white/35">Sin modelo. Cambia con el cursor, las fichas y la inspiración.</p>
+      <section className="rounded-lg border border-white/10 p-3" aria-live="polite">
+        <div className="flex items-baseline justify-between gap-2">
+          <h2 className={heading}>Propuesta mock</h2>
+          <span className="text-[11px] tabular-nums text-white/40">
+            {dragging ? "arrastrando · " : ""}
+            {lines} {lines === 1 ? "renglón" : "renglones"} · ≈{lines * WORDS_PER_LINE} palabras
+          </span>
+        </div>
+        {sentences.length === 0 ? (
+          <p className="mt-2 text-sm text-white/40">La escena mock no tiene más pasos desde acá.</p>
+        ) : (
+          <ol className="mt-2 space-y-1.5 text-sm leading-5 text-white/75">
+            {sentences.map((sentence) => (
+              <li key={sentence.text}>
+                {sentence.text}
+                {sentence.reference ? <Tag tone="#9eb7ff">por referencia</Tag> : null}
+                {sentence.recycled ? <Tag tone="#ffb38a">idea reciclada</Tag> : null}
+              </li>
+            ))}
+          </ol>
+        )}
+        <p className="mt-2 text-[11px] text-white/35">
+          Sin modelo. Cambia con el cursor, las fichas, las referencias y la inspiración.
+        </p>
+      </section>
+
+      <section>
+        <h2 className={heading}>Historial</h2>
+        <p className="mt-1 text-sm text-white/60">
+          {accepted} {accepted === 1 ? "tramo generado" : "tramos generados"} · {discarded}{" "}
+          {discarded === 1 ? "descartado" : "descartados"}
+        </p>
+        {discarded > 0 ? (
+          <p className="mt-1 text-[11px] text-white/40">Lo descartado no vuelve igual: la próxima toma usa otra redacción.</p>
+        ) : null}
+      </section>
+
+      <section>
+        <h2 className={heading}>Referencias conectadas</h2>
+        {draft.references.length === 0 ? (
+          <p className="mt-2 text-sm text-white/40">Ninguna. Doble clic en una palabra para conectarla al cursor.</p>
+        ) : (
+          <ul className="mt-2 space-y-2">
+            {draft.references.map((item) => (
+              <li key={`${item.label}-${item.text}`} className="text-sm text-white/75">
+                <span className="text-[11px] tracking-wide text-[#9eb7ff] uppercase">{item.label}</span>
+                <span className="mt-1 block">{item.text}</span>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
 
       {influence.length > 0 ? (
         <section>
-          <h2 className="text-[11px] tracking-wide text-white/45 uppercase">Influencia</h2>
+          <h2 className={heading}>Influencia</h2>
           <ul className="mt-2 space-y-1 text-sm text-white/70">
             {influence.map((line) => (
               <li key={line}>{line}</li>
@@ -41,7 +101,7 @@ export function Inspector({
       ) : null}
 
       <section>
-        <h2 className="text-[11px] tracking-wide text-white/45 uppercase">Inspiración</h2>
+        <h2 className={heading}>Inspiración</h2>
         <div className="mt-2 flex flex-wrap gap-1">
           {INSPIRATIONS.map((item) => (
             <button
@@ -75,32 +135,18 @@ export function Inspector({
         </ul>
       </section>
 
-      <section>
-        <h2 className="text-[11px] tracking-wide text-white/45 uppercase">Reciente</h2>
-        <p className="mt-2 text-sm leading-5 text-white/70">
-          {draft.recent ? excerpt(draft.recent.text) : "No hay texto antes del cursor."}
-        </p>
-      </section>
-
-      <section>
-        <h2 className="text-[11px] tracking-wide text-white/45 uppercase">Referencias</h2>
-        {draft.references.length === 0 ? (
-          <p className="mt-2 text-sm text-white/40">Ninguna ancla en este punto.</p>
-        ) : (
-          <ul className="mt-2 space-y-2">
-            {draft.references.map((item) => (
-              <li key={item.label} className="text-sm text-white/75">
-                <span className="text-[11px] tracking-wide text-[#9eb7ff] uppercase">{item.label}</span>
-                <span className="mt-1 block">{item.text}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+      <details className="text-sm">
+        <summary className={`${heading} cursor-pointer`}>
+          Prompt al modelo · ≈{estimateTokens(prompt)} tokens
+        </summary>
+        <pre className="mt-2 max-h-80 overflow-auto rounded-md border border-white/10 bg-white/[0.03] p-2 text-[11px] leading-4 whitespace-pre-wrap text-white/65">
+          {prompt}
+        </pre>
+      </details>
 
       {draft.excluded.length > 0 ? (
         <details className="text-sm text-white/50">
-          <summary className="cursor-pointer text-[11px] tracking-wide uppercase">Fuera del contexto</summary>
+          <summary className={`${heading} cursor-pointer`}>Fuera del contexto</summary>
           <ul className="mt-2 space-y-1">
             {draft.excluded.map((item) => (
               <li key={`${item.label}-${item.reason}`}>
@@ -114,8 +160,10 @@ export function Inspector({
   );
 }
 
-function excerpt(text: string): string {
-  const clean = text.replace(/\s+/g, " ").trim();
-  if (clean.length <= 220) return clean;
-  return `…${clean.slice(clean.length - 220)}`;
+function Tag({ tone, children }: { tone: string; children: string }) {
+  return (
+    <span className="ml-1.5 rounded px-1 text-[10px] tracking-wide uppercase" style={{ color: tone, border: `1px solid ${tone}55` }}>
+      {children}
+    </span>
+  );
 }
