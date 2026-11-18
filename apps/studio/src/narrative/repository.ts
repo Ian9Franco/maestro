@@ -1,4 +1,5 @@
 import type { JSONContent } from "@tiptap/core";
+import { defaultDials, normalizeDials } from "./dials";
 import { emptyStyleMix, normalizeStyleMix } from "./style";
 import {
   EMPTY_DOCUMENT,
@@ -37,6 +38,7 @@ export function createProjectRecord(name: string, now: string, id = crypto.rando
     format: "",
     style: "",
     styleMix: emptyStyleMix(),
+    dials: defaultDials(),
     influence: [],
     document: EMPTY_DOCUMENT,
     contextDocs: [],
@@ -62,6 +64,7 @@ export function normalizeProject(value: unknown): ProjectRecord | null {
     format: typeof record.format === "string" ? record.format : "",
     style: typeof record.style === "string" ? record.style : "",
     styleMix: normalizeStyleMix(record.styleMix),
+    dials: normalizeDials(record.dials),
     influence: Array.isArray(record.influence) ? record.influence.filter((item): item is string => typeof item === "string") : [],
     document: record.document as JSONContent,
     contextDocs: Array.isArray(record.contextDocs) ? record.contextDocs.flatMap((item) => normalizeDoc(item) ?? []) : [],

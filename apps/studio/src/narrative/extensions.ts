@@ -2,6 +2,7 @@ import { Extension, Mark, Node, mergeAttributes } from "@tiptap/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import StarterKit from "@tiptap/starter-kit";
+import { endOfBlock } from "./document";
 import { splitSentences } from "./writer";
 
 export const ghostPreviewKey = new PluginKey("ghostPreview");
@@ -25,17 +26,18 @@ export function createGhostPreview() {
                 state.selection.from,
                 () => {
                   const bar = document.createElement("span");
-                  bar.className = "insertion-caret";
-                  bar.setAttribute("aria-hidden", "true");
+                  bar.className = "insertion-hub";
+                  bar.title = "Punto de inserción. Clic para el modo, arrastrá hacia una característica.";
                   return bar;
                 },
                 { side: -1, ignoreSelection: true, key: "insertion-caret" },
               );
               const text = storage.text.trim();
               if (!text || storage.hidden || !state.selection.empty) return DecorationSet.create(state.doc, [caret]);
+              const ghostAt = endOfBlock(state.doc, state.selection.from);
               const sentences = splitSentences(text);
               const widget = Decoration.widget(
-                state.selection.from,
+                ghostAt,
                 () => {
                   const span = document.createElement("span");
                   span.className = "ghost-preview";

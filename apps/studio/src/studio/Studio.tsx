@@ -17,6 +17,7 @@ import { assemblePrompt, renderPrompt } from "@/narrative/prompt";
 import { toSummary, type NarrativeRepository } from "@/narrative/repository";
 import { describeStyle, INSPIRATIONS, mixFromWeights, type InspirationId } from "@/narrative/style";
 import type { ContextDocument, GenerationRecord, ProjectRecord, ProjectSummary } from "@/narrative/types";
+import { type NarrativeDials } from "@/narrative/dials";
 import { joinSentences, MAX_LINES, PREVIEW_LINES, splitSentences, WORDS_PER_LINE, writeSentences } from "@/narrative/writer";
 import { ContextPanel } from "@/studio/ContextPanel";
 import { Inspector } from "@/studio/Inspector";
@@ -122,6 +123,7 @@ export function Studio() {
         whole: doc.textBetween(0, doc.content.size, " ", " "),
         names: draft.contextDocs.map((item) => item.label),
         weights: project.styleMix,
+        dials: project.dials,
         references,
         discarded,
       };
@@ -190,7 +192,7 @@ export function Studio() {
   }
 
   function patch(
-    partial: Partial<Pick<ProjectRecord, "name" | "format" | "style" | "styleMix" | "contextDocs">>,
+    partial: Partial<Pick<ProjectRecord, "name" | "format" | "style" | "styleMix" | "contextDocs" | "dials">>,
     when: "now" | "soon",
   ) {
     const current = projectRef.current;
@@ -255,6 +257,10 @@ export function Studio() {
       params: { maxWords: 0 },
       status: "discarded",
     });
+  }
+
+  function onDials(dials: NarrativeDials) {
+    patch({ dials }, "soon");
   }
 
   function onWeight(id: string, weight: number) {
@@ -329,9 +335,11 @@ export function Studio() {
           </button>
         </header>
         <div className="mx-auto w-full max-w-[44rem] px-3 py-8 sm:px-5">
-          <ul className="mb-4 space-y-1 pl-10 text-xs text-white/40">
+          <ul className="mb-4 space-y-1 pl-24 text-xs text-white/40">
             <li>Generar: arrastrá el texto gris, o los renglones de abajo, hasta la oración que quieras. Tab acepta dos.</li>
-            <li>Arrastrar sobre texto generado lo borra al paso. El punto azul no sigue al clic: se queda donde generaste.</li>
+            <li>Un clic mueve el punto: ahí se escribe a mano y de ahí sigue la generación.</li>
+            <li>Clic en el punto abre el modo. Arrastralo hacia tensión, sorpresa, ritmo o distancia para subir o bajar esa característica.</li>
+            <li>Arrastrar sobre texto generado lo borra al paso.</li>
             <li>Contexto: doble clic marca una palabra y esconde la propuesta. Otro clic elige, el siguiente marca.</li>
           </ul>
           <NarrativeEditor
@@ -347,6 +355,8 @@ export function Studio() {
             onGenerate={onGenerate}
             onDiscard={onDiscard}
             onMood={setMood}
+            dials={project.dials}
+            onDials={onDials}
           />
         </div>
       </section>
@@ -369,6 +379,7 @@ export function Studio() {
               prompt={renderPrompt(scene.draft)}
               history={generations}
               influence={project.influence}
+              dials={project.dials}
               styleMix={project.styleMix}
               onWeight={onWeight}
               onInspiration={onInspiration}

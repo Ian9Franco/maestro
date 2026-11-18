@@ -1,4 +1,5 @@
 import type { JSONContent } from "@tiptap/core";
+import type { NarrativeDials } from "./dials";
 
 /**
  * El documento guardado es el JSON de ProseMirror.
@@ -42,6 +43,7 @@ export type ProjectRecord = {
   format: string;
   style: string;
   styleMix: StyleWeight[];
+  dials: NarrativeDials;
   influence: string[];
   document: JSONContent;
   contextDocs: ContextDocument[];

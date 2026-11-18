@@ -14,6 +14,7 @@ import {
   snapToWord,
   tokenAt,
 } from "@/narrative/document";
+import { cycleMode, dialCaption, fanSpokes, readDial, withDial, type DialId, type NarrativeDials } from "@/narrative/dials";
 import { emotionOf } from "@/narrative/emotion";
 import { createNarrativeExtensions, ghostPreviewKey } from "@/narrative/extensions";
 import { REFERENCE_INTENTS, type ReferenceIntent } from "@/narrative/types";
@@ -38,7 +39,7 @@ type Layout = {
     weight: number;
     referenced: boolean;
     after: boolean;
-    color: string;
+    hot: boolean;
     emotion: string;
   }[];
   references: { id: string; intent: ReferenceIntent; connected: boolean; start: Point; end: Point }[];
@@ -58,6 +59,8 @@ export function NarrativeEditor({
   onGenerate,
   onDiscard,
   onMood,
+  dials,
+  onDials,
 }: {
   projectId: string;
   initial: JSONContent;
@@ -70,9 +73,13 @@ export function NarrativeEditor({
   onGenerate: (lines: number) => GeneratedBlock | null;
   onDiscard: (discarded: Discarded) => void;
   onMood?: (mood: "generar" | "contexto") => void;
+  dials: NarrativeDials;
+  onDials: (dials: NarrativeDials) => void;
 }) {
-  const callbacks = useRef({ onChange, onCursor, onDragLines, onGenerate, onDiscard, onMood });
-  callbacks.current = { onChange, onCursor, onDragLines, onGenerate, onDiscard, onMood };
+  const callbacks = useRef({ onChange, onCursor, onDragLines, onGenerate, onDiscard, onMood, onDials });
+  callbacks.current = { onChange, onCursor, onDragLines, onGenerate, onDiscard, onMood, onDials };
+  const dialsRef = useRef(dials);
+  dialsRef.current = dials;
   const cursorRef = useRef(initialCursor);
   const atEndRef = useRef(placeAtEnd);
   cursorRef.current = initialCursor;
@@ -90,13 +97,22 @@ export function NarrativeEditor({
   const draftId = useRef<string | null>(null);
   const pendingErase = useRef<{ text: string; ids: Discarded["ids"] } | null>(null);
   const acceptRef = useRef<number | null>(null);
+  const dialOpenRef = useRef(false);
+  const workingDials = useRef<NarrativeDials | null>(null);
   const ghostDrag = useRef(false);
+  const beforeClick = useRef<number | null>(null);
+  const hubDrag = useRef(false);
+  const [dialOpen, setDialOpen] = useState(false);
+  const [liveDials, setLiveDials] = useState<NarrativeDials | null>(null);
+  const [activeDial, setActiveDial] = useState<DialId | null>(null);
   const ghost = useRef<{ text: string; hidden: boolean; accept: number } | null>(null);
   const [mood, setMoodState] = useState<Mood>("generar");
   const wrapper = useRef<HTMLDivElement>(null);
   const runway = useRef<HTMLDivElement>(null);
   const resizing = useRef<{ id: string; side: "start" | "end" } | null>(null);
   const [layout, setLayout] = useState<Layout>(EMPTY_LAYOUT);
+  const layoutRef = useRef(layout);
+  layoutRef.current = layout;
   const [dragLines, setDragLines] = useState<number | null>(null);
 
   function setMood(next: Mood) {
@@ -121,17 +137,20 @@ export function NarrativeEditor({
         },
         handleDOMEvents: {
           mousedown: (view, event) => {
-            if (ghostDrag.current) return true;
+            if (ghostDrag.current || hubDrag.current) return true;
             const target = eventTarget(event);
-            if (target?.closest(".ghost-sentence, .reference-handle, button")) return true;
+            if (target?.closest(".ghost-sentence, .insertion-hub, .reference-handle, button, .dial-label")) return true;
             event.preventDefault();
             view.focus();
             const hit = view.posAtCoords({ left: event.clientX, top: event.clientY });
             if (!hit) return true;
             if (event.detail >= 2) {
+              const back = beforeClick.current;
+              if (typeof back === "number") placeCaret(view, back, false);
               enterContext(view, hit.pos);
               return true;
             }
+            beforeClick.current = insertion.current;
             gesture.current = { x: event.clientX, y: event.clientY, pos: hit.pos, moved: false };
             return true;
           },
@@ -139,6 +158,10 @@ export function NarrativeEditor({
         handleDoubleClick: () => true,
         handleKeyDown: (view, event) => {
           if (event.key === "Escape") {
+            setDialOpen(false);
+            dialOpenRef.current = false;
+            setLiveDials(null);
+            setActiveDial(null);
             setMood("generar");
             return true;
           }
@@ -153,18 +176,31 @@ export function NarrativeEditor({
         callbacks.current.onChange(current.getJSON());
       },
       onSelectionUpdate: ({ editor: current }) => {
-        const at = insertion.current;
-        if (at == null || moving.current) return;
+        if (moving.current || moodRef.current === "contexto") return;
         const selection = current.state.selection;
-        if (selection.empty && selection.from === at) return;
-        moving.current = true;
-        const safe = Math.max(0, Math.min(at, current.state.doc.content.size));
-        current.commands.setTextSelection(safe);
-        moving.current = false;
+        if (!selection.empty || selection.from === insertion.current) return;
+        insertion.current = selection.from;
+        callbacks.current.onCursor(selection.from);
       },
     },
     [projectId, extensions, content],
   );
+
+  function placeCaret(view: EditorView, pos: number, closeDial = true) {
+    const safe = textCaret(view.state.doc, pos);
+    moving.current = true;
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, safe)));
+    moving.current = false;
+    insertion.current = view.state.selection.from;
+    callbacks.current.onCursor(insertion.current);
+    if (closeDial) {
+      setDialOpen(false);
+      dialOpenRef.current = false;
+      setLiveDials(null);
+      setActiveDial(null);
+    }
+    view.focus();
+  }
 
   function generate(view: EditorView, lines: number) {
     if (moodRef.current === "contexto") return;
@@ -290,7 +326,11 @@ export function NarrativeEditor({
         draftId.current = null;
         return;
       }
-      if (moodRef.current === "contexto") armContext(editor.view, active.pos);
+      if (moodRef.current === "contexto") {
+        armContext(editor.view, active.pos);
+        return;
+      }
+      placeCaret(editor.view, active.pos);
     };
     document.addEventListener("pointermove", onMove);
     document.addEventListener("pointerup", onUp);
@@ -334,6 +374,9 @@ export function NarrativeEditor({
 
   function onRunwayDown(event: ReactPointerEvent<HTMLDivElement>) {
     if (!editor || moodRef.current === "contexto") return;
+    setDialOpen(false);
+    dialOpenRef.current = false;
+    setActiveDial(null);
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
     setAccept(linesAt(event.clientY));
@@ -428,8 +471,72 @@ export function NarrativeEditor({
     };
   }, [editor]);
 
+  useEffect(() => {
+    const root = wrapper.current;
+    if (!root) return;
+    let moved = false;
+    const pointOf = (event: PointerEvent) => {
+      const box = root.getBoundingClientRect();
+      return { x: event.clientX - box.left, y: event.clientY - box.top };
+    };
+    const onDown = (event: PointerEvent) => {
+      const target = eventTarget(event);
+      if (!target?.closest(".insertion-hub")) return;
+      event.preventDefault();
+      event.stopPropagation();
+      hubDrag.current = true;
+      moved = false;
+      const open = dialOpenRef.current;
+      workingDials.current = dialsRef.current;
+      setLiveDials(dialsRef.current);
+      setDialOpen(true);
+      dialOpenRef.current = true;
+      root.dataset.dialWasOpen = open ? "1" : "0";
+    };
+    const onMove = (event: PointerEvent) => {
+      if (!hubDrag.current || !workingDials.current) return;
+      const caret = layoutRef.current.caret;
+      if (!caret) return;
+      const hub = { x: caret.x + 6, y: caret.y + caret.h / 2 };
+      const point = pointOf(event);
+      const spokes = fanSpokes(hub, fanFloor(layoutRef.current, hub.y));
+      if (Math.hypot(point.x - hub.x, point.y - hub.y) < 10) return;
+      moved = true;
+      const reading = readDial(hub, point, spokes);
+      const next = withDial(workingDials.current, reading.id, reading.value);
+      workingDials.current = next;
+      setLiveDials(next);
+      setActiveDial(reading.id);
+    };
+    const onUp = () => {
+      if (!hubDrag.current) return;
+      hubDrag.current = false;
+      const wasOpen = root.dataset.dialWasOpen === "1";
+      if (moved && workingDials.current) {
+        callbacks.current.onDials(workingDials.current);
+        setDialOpen(true);
+        dialOpenRef.current = true;
+        return;
+      }
+      setActiveDial(null);
+      if (wasOpen) {
+        setDialOpen(false);
+        dialOpenRef.current = false;
+        setLiveDials(null);
+      }
+    };
+    root.addEventListener("pointerdown", onDown, true);
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+    return () => {
+      root.removeEventListener("pointerdown", onDown, true);
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+    };
+  }, [editor]);
+
   return (
-    <div ref={wrapper} className="relative pl-10" data-mood={mood}>
+    <div ref={wrapper} className="relative pl-24" data-mood={mood}>
       <div className="mb-3 flex items-center gap-2">
         <button type="button" aria-pressed={mood === "generar"} className="mood-button" onClick={() => setMood("generar")}>
           Generar
@@ -439,12 +546,21 @@ export function NarrativeEditor({
         </button>
         <span className="text-[11px] text-white/40">
           {mood === "generar"
-            ? "Arrastrá el texto gris para aceptar hasta ahí. Arrastrar texto generado lo borra."
+            ? "Un clic mueve el punto. Clic en el punto abre el modo. Arrastrá el texto gris para aceptarlo."
             : "Sin propuesta. Un clic elige el lugar, el siguiente lo marca. Esc vuelve a generar."}
         </span>
       </div>
       <Gutter blocks={layout.blocks} onPlace={placeAt} />
       <Connectors layout={layout} />
+      {dialOpen && layout.caret ? (
+        <DialFan
+          caret={layout.caret}
+          dials={liveDials ?? dials}
+          active={activeDial}
+          floor={fanFloor(layout, layout.caret.y + layout.caret.h / 2)}
+          onCycle={() => callbacks.current.onDials({ ...dialsRef.current, mode: cycleMode(dialsRef.current.mode) })}
+        />
+      ) : null}
       <EditorContent editor={editor} />
       {layout.references.map((reference) => (
         <ReferenceHandles
@@ -486,38 +602,106 @@ export function NarrativeEditor({
 
 function Gutter({ blocks, onPlace }: { blocks: Layout["blocks"]; onPlace: (pos: number) => void }) {
   return (
-    <div className="absolute top-0 left-0 w-8">
-      {blocks.map((block) => {
-        const count = block.after ? 1 : Math.max(block.weight, 1);
-        return (
-          <button
-            key={block.key}
-            type="button"
-            className="emotion-stack"
-            style={{ top: block.top, height: block.height }}
-            title={
-              block.after
-                ? "Después del punto de inserción: no se usa"
-                : `${block.emotion} · peso ${block.weight}. Clic para continuar desde este párrafo.`
-            }
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={() => onPlace(block.pos)}
-          >
-            {Array.from({ length: count }, (_, index) => (
-              <i
-                key={index}
-                className="emotion-tick"
-                style={{
-                  background: block.after ? "rgba(255,255,255,0.22)" : block.color,
-                  opacity: block.after ? 0.35 : 0.35 + ((index + 1) / count) * 0.65,
-                }}
-              />
+    <div className="context-rail">
+      {blocks.map((block) => (
+        <button
+          key={block.key}
+          type="button"
+          className="context-rail-row"
+          style={{ top: block.top }}
+          title={
+            block.after
+              ? "Después del punto de inserción: no se usa"
+              : `${block.emotion} · peso ${block.weight}. Clic para continuar desde este párrafo.`
+          }
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => onPlace(block.pos)}
+        >
+          <span className="context-score">{block.after ? "" : block.weight.toFixed(2)}</span>
+          <span className="context-barcode" data-hot={block.hot ? "" : undefined}>
+            {Array.from({ length: 10 }, (_, index) => (
+              <i key={index} data-on={index < block.weight && !block.after ? "" : undefined} />
             ))}
-          </button>
-        );
-      })}
+          </span>
+        </button>
+      ))}
     </div>
   );
+}
+
+function DialFan({
+  caret,
+  dials,
+  active,
+  floor,
+  onCycle,
+}: {
+  caret: Point;
+  dials: NarrativeDials;
+  active: DialId | null;
+  floor: number;
+  onCycle: () => void;
+}) {
+  const hub = { x: caret.x + 6, y: caret.y + caret.h / 2 };
+  const spokes = fanSpokes(hub, floor);
+  return (
+    <div className="pointer-events-none absolute inset-0 z-20">
+      <svg aria-hidden className="absolute inset-0 h-full w-full overflow-visible">
+        {spokes.map((spoke) => {
+          const end = { x: spoke.x, y: spoke.y };
+          const value = spoke.id === "mode" ? dials.amount : dials[spoke.id];
+          const tip = {
+            x: hub.x + (spoke.x - hub.x) * (0.2 + value / 140),
+            y: hub.y + (spoke.y - hub.y) * (0.2 + value / 140),
+          };
+          const bend = bowPoint(hub, tip);
+          const hot = spoke.id === active;
+          return (
+            <g key={spoke.id}>
+              <line x1={hub.x} y1={hub.y} x2={end.x} y2={end.y} stroke="rgba(255,255,255,0.45)" strokeDasharray="1 5" strokeWidth={1} />
+              {hot ? (
+                <path d={`M ${hub.x} ${hub.y} Q ${bend.x} ${bend.y} ${tip.x} ${tip.y}`} fill="none" stroke="#ff5a3c" strokeWidth={1.4} />
+              ) : null}
+              <circle cx={end.x} cy={end.y} r={3} fill="none" stroke={hot ? "#ff5a3c" : "rgba(255,255,255,0.45)"} />
+            </g>
+          );
+        })}
+      </svg>
+      {spokes.map((spoke) => (
+        <span
+          key={spoke.id}
+          className="dial-label pointer-events-auto absolute whitespace-nowrap text-[11px] text-white/80"
+          style={{
+            left: spoke.x,
+            top: spoke.y,
+            transform: spoke.x < hub.x ? "translate(-100%, -50%)" : "translate(8px, -50%)",
+          }}
+        >
+          {spoke.id === "mode" ? (
+            <button type="button" className="text-[#ff8a70]" onMouseDown={(event) => event.preventDefault()} onClick={onCycle}>
+              {dialCaption(dials, spoke.id)}
+            </button>
+          ) : (
+            dialCaption(dials, spoke.id)
+          )}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function fanFloor(layout: Layout, hubY: number): number {
+  const bottom = layout.blocks.reduce((max, block) => Math.max(max, block.top + block.height), 0);
+  return Math.max(bottom + 28, hubY + 120);
+}
+
+function bowPoint(hub: { x: number; y: number }, tip: { x: number; y: number }): { x: number; y: number } {
+  const midX = (hub.x + tip.x) / 2;
+  const midY = (hub.y + tip.y) / 2;
+  const dx = tip.x - hub.x;
+  const dy = tip.y - hub.y;
+  const length = Math.hypot(dx, dy) || 1;
+  return { x: midX + (-dy / length) * 22, y: midY + (dx / length) * 22 };
 }
 
 function Connectors({ layout }: { layout: Layout }) {
@@ -634,7 +818,7 @@ function measure(view: EditorView, wrapper: HTMLElement): Layout {
         weight: weight.weight,
         referenced: weight.referenced,
         after: weight.after,
-        color: weight.referenced ? "#9eb7ff" : emotion.color,
+        hot: cursor >= weight.pos && cursor <= weight.pos + (doc.nodeAt(weight.pos)?.nodeSize ?? 0),
         emotion: weight.referenced ? "Referencia" : emotion.name,
       },
     ];
@@ -655,6 +839,16 @@ function measure(view: EditorView, wrapper: HTMLElement): Layout {
     ];
   });
   return { caret: point(cursor, -1), blocks, references };
+}
+
+function textCaret(doc: EditorView["state"]["doc"], pos: number): number {
+  const max = Math.max(1, doc.content.size - 1);
+  const safe = Math.max(1, Math.min(pos, max));
+  try {
+    return TextSelection.create(doc, safe).from;
+  } catch {
+    return max;
+  }
 }
 
 function eventTarget(event: Event): Element | null {
