@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState, type FormEvent } from "react";
+import { useId, useState, type FormEvent, type ReactNode } from "react";
 import type { ContextDocument, ContextKind, ProjectSummary } from "@/narrative/types";
 
 const KINDS: { id: ContextKind; label: string }[] = [
@@ -13,14 +13,13 @@ const KINDS: { id: ContextKind; label: string }[] = [
 export function ContextPanel({
   name,
   format,
-  style,
   docs,
   projects,
   projectId,
   saveLabel,
+  inspector,
   onName,
   onFormat,
-  onStyle,
   onDocs,
   onOpen,
   onCreate,
@@ -28,14 +27,13 @@ export function ContextPanel({
 }: {
   name: string;
   format: string;
-  style: string;
   docs: ContextDocument[];
   projects: ProjectSummary[];
   projectId: string;
   saveLabel: string;
+  inspector: ReactNode;
   onName: (value: string) => void;
   onFormat: (value: string) => void;
-  onStyle: (value: string) => void;
   onDocs: (docs: ContextDocument[]) => void;
   onOpen: (id: string) => void;
   onCreate: () => void;
@@ -97,6 +95,7 @@ export function ContextPanel({
       </div>
 
       <Field id={`${baseId}-name`} label="Título" value={name} onChange={onName} />
+      {inspector}
       <Field
         id={`${baseId}-format`}
         label="Formato"
@@ -104,14 +103,6 @@ export function ContextPanel({
         onChange={onFormat}
         multiline
         placeholder="Prosa corrida, capítulos cortos, tiempo presente."
-      />
-      <Field
-        id={`${baseId}-style`}
-        label="Estilo"
-        value={style}
-        onChange={onStyle}
-        multiline
-        placeholder="Sobrio, sensorial, sin explicar de más."
       />
 
       <form className="space-y-2 border-t border-white/10 pt-4" onSubmit={addDoc}>

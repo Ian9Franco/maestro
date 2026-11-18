@@ -1,4 +1,5 @@
 import type { JSONContent } from "@tiptap/core";
+import { emptyStyleMix, normalizeStyleMix } from "./style";
 import {
   EMPTY_DOCUMENT,
   GENERATION_STATUSES,
@@ -35,8 +36,11 @@ export function createProjectRecord(name: string, now: string, id = crypto.rando
     name: name.trim() || "Sin título",
     format: "",
     style: "",
+    styleMix: emptyStyleMix(),
+    influence: [],
     document: EMPTY_DOCUMENT,
     contextDocs: [],
+    cursor: null,
     createdAt: now,
     updatedAt: now,
   };
@@ -57,8 +61,11 @@ export function normalizeProject(value: unknown): ProjectRecord | null {
     name: typeof record.name === "string" && record.name.trim() ? record.name : "Sin título",
     format: typeof record.format === "string" ? record.format : "",
     style: typeof record.style === "string" ? record.style : "",
+    styleMix: normalizeStyleMix(record.styleMix),
+    influence: Array.isArray(record.influence) ? record.influence.filter((item): item is string => typeof item === "string") : [],
     document: record.document as JSONContent,
     contextDocs: Array.isArray(record.contextDocs) ? record.contextDocs.flatMap((item) => normalizeDoc(item) ?? []) : [],
+    cursor: typeof record.cursor === "number" ? record.cursor : null,
     createdAt: typeof record.createdAt === "string" ? record.createdAt : new Date(0).toISOString(),
     updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : new Date(0).toISOString(),
   };

@@ -69,3 +69,12 @@ body {
   background: #9eb7ff;
   vertical-align: middle;
 }
+
+.narrative-editor .ghost-preview {
+  display: block;
+  margin: 0.85rem 0 0.2rem;
+  padding-left: 0.75rem;
+  border-left: 2px solid rgba(255, 255, 255, 0.18);
+  color: rgba(255, 255, 255, 0.42);
+  pointer-events: none;
+}
