@@ -55,6 +55,84 @@ export function addReference(
   return tr.doc;
 }
 
+/** Referencia sin ancla: sigue al punto de inserción, esté donde esté. */
+export function connectReference(
+  doc: ProseNode,
+  from: number,
+  to: number,
+  intent: ReferenceIntent,
+  referenceId: string,
+): ProseNode {
+  const mark = doc.type.schema.marks.reference.create({ id: referenceId, intent });
+  return EditorState.create({ doc }).tr.addMark(from, to, mark).doc;
+}
+
+export function referenceConnected(doc: ProseNode, cursor: number, reference: LiveReference): boolean {
+  if (reference.text.trim().length === 0) return false;
+  if (reference.anchorPos === null) return true;
+  return sameBlock(doc, cursor, reference.anchorPos);
+}
+
+const WORD_CHAR = /[\p{L}\p{N}'’-]/u;
+
+export function wordAt(doc: ProseNode, pos: number): { from: number; to: number } | null {
+  const safe = Math.max(0, Math.min(pos, doc.content.size));
+  const resolved = doc.resolve(safe);
+  const parent = resolved.parent;
+  if (!parent.isTextblock) return null;
+  const text = parent.textBetween(0, parent.content.size, undefined, "\ufffc");
+  let start = resolved.parentOffset;
+  let end = resolved.parentOffset;
+  while (start > 0 && WORD_CHAR.test(text[start - 1] ?? "")) start -= 1;
+  while (end < text.length && WORD_CHAR.test(text[end] ?? "")) end += 1;
+  if (start === end) return null;
+  const base = resolved.start();
+  return { from: base + start, to: base + end };
+}
+
+/** Encaja en el borde de una palabra; la puntuación y los espacios no entran en la referencia. */
+export function snapToWord(doc: ProseNode, pos: number, side: "start" | "end"): number {
+  const word = wordAt(doc, pos);
+  if (word) return side === "start" ? word.from : word.to;
+  const safe = Math.max(0, Math.min(pos, doc.content.size));
+  const resolved = doc.resolve(safe);
+  if (!resolved.parent.isTextblock) return pos;
+  const text = resolved.parent.textBetween(0, resolved.parent.content.size, undefined, "\ufffc");
+  let offset = resolved.parentOffset;
+  if (side === "end") {
+    while (offset > 0 && !WORD_CHAR.test(text[offset - 1] ?? "")) offset -= 1;
+  } else {
+    while (offset < text.length && !WORD_CHAR.test(text[offset] ?? "")) offset += 1;
+  }
+  return resolved.start() + offset;
+}
+
+/** Verdadero si el rango tiene texto y todo ese texto es generado. */
+export function isFullyGenerated(doc: ProseNode, from: number, to: number): boolean {
+  if (to <= from) return false;
+  let sawText = false;
+  let manual = false;
+  doc.nodesBetween(from, to, (node) => {
+    if (manual || !node.isText) return;
+    sawText = true;
+    if (!node.marks.some((mark) => mark.type.name === "generated")) manual = true;
+  });
+  return sawText && !manual;
+}
+
+export function generatedIdsBetween(doc: ProseNode, from: number, to: number): { blockId: string; generationId: string }[] {
+  const seen = new Map<string, string>();
+  doc.nodesBetween(from, to, (node) => {
+    if (!node.isText) return;
+    for (const mark of node.marks) {
+      if (mark.type.name !== "generated") continue;
+      const id = String(mark.attrs.id ?? "");
+      if (id && !seen.has(id)) seen.set(id, String(mark.attrs.generationId ?? ""));
+    }
+  });
+  return [...seen].map(([blockId, generationId]) => ({ blockId, generationId }));
+}
+
 export type GeneratedSpan = {
   id: string;
   generationId: string;

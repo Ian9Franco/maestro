@@ -1,11 +1,13 @@
 import type { JSONContent } from "@tiptap/core";
-import { addReference, documentFromJSON, narrativeSchema } from "./document";
+import { connectReference, documentFromJSON, narrativeSchema } from "./document";
 import { createProjectRecord } from "./repository";
-import { describeStyle, mixFromWeights, weightOf, type StyleId } from "./style";
-import type { ContextDocument, ContextKind, ProjectRecord, StyleWeight } from "./types";
+import { describeStyle, mixFromWeights } from "./style";
+import type { ContextDocument, ContextKind, ProjectRecord } from "./types";
 
-export const DEMO_CONTINUED_ID = "demo-azotea";
-export const DEMO_BLANK_ID = "demo-desde-cero";
+export const DEMO_CONTINUED_ID = "demo-azotea-2";
+export const DEMO_BLANK_ID = "demo-desde-cero-2";
+/** Ejemplos de la versión anterior: la referencia tenía un ancla fija. Se reemplazan. */
+export const RETIRED_DEMO_IDS = ["demo-azotea", "demo-desde-cero"];
 
 const FORMAT = "Prosa corrida. Un bloque por escena, no un capítulo entero.";
 
@@ -52,32 +54,6 @@ export function blankDemo(now = "2026-11-18T11:00:00.000Z"): ProjectRecord {
   };
 }
 
-export function mockContinuation(input: {
-  started: boolean;
-  atSceneEnd: boolean;
-  names: string[];
-  weights: StyleWeight[];
-}): string {
-  const included = (name: string) => input.names.some((item) => item.toLowerCase() === name.toLowerCase());
-  const weight = (id: StyleId) => weightOf(input.weights, id);
-  const tone = accent(weight);
-  if (!input.started) {
-    const opening = included("Joker")
-      ? "La lluvia todavía no cae sobre nadie. Una risa cruza la azotea antes de que la ciudad elija un testigo."
-      : "La lluvia todavía no cae sobre nadie. La azotea está vacía y la ciudad espera la primera frase.";
-    return tone ? `${opening} ${tone}` : opening;
-  }
-  if (!input.atSceneEnd) {
-    return "Desde esta frase seguiría un bloque nuevo, sin reescribir lo que ya está escrito.";
-  }
-  let line = included("Batman")
-    ? "Un ruido metálico interrumpió la azotea. Batman no se dio vuelta enseguida."
-    : "Un ruido metálico interrumpió la azotea. Nadie con nombre lo reclamó.";
-  if (included("Joker")) line += " La risa llegó antes que la figura.";
-  if (weight("introspectivo") >= 50 && included("Batman")) line += " Guarda lo que sabe.";
-  return tone ? `${line} ${tone}` : line;
-}
-
 export function continuedDocument(): JSONContent {
   const schema = narrativeSchema();
   let doc = schema.node("doc", null, [
@@ -87,7 +63,7 @@ export function continuedDocument(): JSONContent {
   ]);
   const phrase = locate(doc, "azotea vacía");
   if (!phrase) return doc.toJSON();
-  doc = addReference(doc, phrase.from, phrase.to, phrase.to, "hecho", "ref-azotea", "anc-azotea");
+  doc = connectReference(doc, phrase.from, phrase.to, "hecho", "ref-azotea");
   return doc.toJSON();
 }
 
@@ -161,18 +137,4 @@ export function isEmptyStory(document: JSONContent): boolean {
   } catch {
     return false;
   }
-}
-
-function accent(weight: (id: StyleId) => number): string | null {
-  const options: Array<[number, string]> = [
-    [weight("noir"), "La ciudad se cierra sobre el edificio."],
-    [weight("thriller"), "El tiempo, de golpe, se acorta."],
-    [weight("accion"), "El siguiente movimiento ya es físico."],
-    [weight("atmosferico"), "El agua corre por el borde de la cornisa."],
-    [weight("humor"), "Nadie abajo habría pagado entrada."],
-  ];
-  options.sort((a, b) => b[0] - a[0]);
-  const top = options[0];
-  if (!top || top[0] < 55) return null;
-  return top[1];
 }

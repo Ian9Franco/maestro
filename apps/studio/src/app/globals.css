@@ -23,7 +23,7 @@ body {
 }
 
 .narrative-editor {
-  min-height: 70vh;
+  min-height: 1.7em;
   outline: none;
   font-family: var(--font-mono), ui-monospace, monospace;
   font-size: 15px;
@@ -68,6 +68,57 @@ body {
   border-radius: 999px;
   background: #9eb7ff;
   vertical-align: middle;
+}
+
+.narrative-editor .generated::selection {
+  background: rgba(255, 70, 40, 0.6);
+  text-decoration: line-through;
+}
+
+.runway {
+  position: relative;
+}
+
+.runway-line {
+  height: 25.5px;
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.07);
+}
+
+.runway-line[data-on] {
+  background: rgba(255, 138, 90, 0.1);
+  border-bottom-color: rgba(255, 138, 90, 0.45);
+}
+
+.runway-label {
+  position: absolute;
+  top: 4px;
+  left: 0;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.3);
+  pointer-events: none;
+}
+
+.reference-handle::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  border-radius: 999px;
+  background: #9eb7ff;
+  opacity: 0.8;
+}
+
+.reference-handle::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: -3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #9eb7ff;
 }
 
 .narrative-editor .ghost-preview {
