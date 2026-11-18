@@ -7,7 +7,7 @@ const mono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-mono" });
 
 export const metadata: Metadata = {
   title: "Maestro",
-  description: "Mesa para dirigir una historia, línea por línea.",
+  description: "Editor narrativo. El cursor marca dónde sigue la historia.",
 };
 
 export const viewport = {

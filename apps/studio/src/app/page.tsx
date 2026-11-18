@@ -1,5 +1,5 @@
-import { Desk } from "@/components/Desk";
+import { Studio } from "@/studio/Studio";
 
 export default function Home() {
-  return <Desk />;
+  return <Studio />;
 }
