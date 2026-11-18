@@ -25,9 +25,18 @@ pnpm dev
 Abre [http://localhost:3000](http://localhost:3000).
 
 ```bash
+pnpm typecheck
 pnpm test
 pnpm build
 ```
+
+## Integración
+
+Cada push a `main` y cada pull request corre [CI](.github/workflows/ci.yml): instala con el lockfile, y después `pnpm typecheck`, `pnpm test` y `pnpm build`. Si alguno falla, el check queda en rojo. No despliega.
+
+El despliegue lo hace Vercel, que ya estaba conectado al repo. El proyecto es el Next de `apps/studio`. Un pull request publica un preview. Al mergear a `main`, Vercel publica producción en [maestro-ian9francos-projects.vercel.app](https://maestro-ian9francos-projects.vercel.app). Vercel compila con Node 26. El CI usa Node 22, la misma versión con la que se desarrollan las pruebas.
+
+Antes de este workflow, un pull request solo mostraba el preview de Vercel y un aviso de CodeRabbit. CodeRabbit no revisa el repo porque tiene menos de 10 estrellas. Nadie ejecutaba los tipos ni las pruebas antes de mergear.
 
 ## Licencia
 

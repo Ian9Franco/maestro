@@ -5,6 +5,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "typecheck": "tsc --noEmit --pretty false",
     "test": "tsx --test src/narrative/*.test.ts"
   },
   "dependencies": {
